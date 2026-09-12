@@ -1,0 +1,1 @@
+{"version":3,"file":"http-error.d.ts","sourceRoot":"","sources":["../src/http-error.ts"],"names":[],"mappings":"AAEA;;GAEG;AACH,MAAM,CAAC,OAAO,OAAO,SAAU,SAAQ,KAAK;IACpC,IAAI,EAAE,MAAM,CAAC;IACb,UAAU,EAAE,MAAM,CAAC;gBAEd,UAAU,EAAE,MAAM,EAAE,OAAO,qBAA2B;CAKlE"}

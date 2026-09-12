@@ -1,0 +1,84 @@
+{
+  "name": "quickjs-wasi",
+  "version": "2.2.0",
+  "description": "Snapshotable JavaScript runtime via WebAssembly. QuickJS-NG compiled to WASM with snapshot/restore support.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./url": {
+      "types": "./dist/url.d.ts",
+      "default": "./dist/url.js"
+    },
+    "./encoding": {
+      "types": "./dist/encoding.d.ts",
+      "default": "./dist/encoding.js"
+    },
+    "./base64": {
+      "types": "./dist/base64.d.ts",
+      "default": "./dist/base64.js"
+    },
+    "./structured-clone": {
+      "types": "./dist/structured-clone.d.ts",
+      "default": "./dist/structured-clone.js"
+    },
+    "./headers": {
+      "types": "./dist/headers.d.ts",
+      "default": "./dist/headers.js"
+    },
+    "./crypto": {
+      "types": "./dist/crypto.d.ts",
+      "default": "./dist/crypto.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "quickjs.wasm",
+    "extensions/*/*.so"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/vercel-labs/quickjs-wasi.git"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.30.0",
+    "@types/node": "^22.0.0",
+    "@vercel/nft": "^1.3.2",
+    "bun": "^1.3.10",
+    "core-js-pure": "^3.48.0",
+    "degenerator": "^5.0.1",
+    "esbuild": "^0.27.3",
+    "fast-text-encoding": "^1.0.6",
+    "quickjs-emscripten": "^0.32.0",
+    "tinybench": "^6.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18",
+    "whatwg-fetch": "^3.6.20"
+  },
+  "scripts": {
+    "setup": "make setup",
+    "build:wasm": "make",
+    "build:ts": "tsc",
+    "build": "pnpm run build:wasm && pnpm run build:ts",
+    "test": "vitest run",
+    "bench": "pnpm run bench:url && pnpm run bench:encoding && pnpm run bench:base64 && pnpm run bench:headers && pnpm run bench:emscripten",
+    "bench:url": "bun run bench/url-benchmark.ts",
+    "bench:encoding": "bun run bench/encoding-benchmark.ts",
+    "bench:base64": "bun run bench/base64-benchmark.ts",
+    "bench:headers": "bun run bench/headers-benchmark.ts",
+    "bench:emscripten": "bun run bench/emscripten-benchmark.ts",
+    "changeset": "changeset",
+    "ci:version": "changeset version && node -e \"fs.writeFileSync('src/version.ts', '// Auto-synced with package.json version. Do not edit manually.\\nexport const VERSION = ' + JSON.stringify(require('./package.json').version) + ';\\n')\"",
+    "ci:publish": "pnpm run build && changeset publish"
+  }
+}

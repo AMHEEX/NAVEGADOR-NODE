@@ -1,0 +1,58 @@
+{
+  "name": "pac-proxy-agent",
+  "version": "9.1.0",
+  "type": "module",
+  "description": "A PAC file proxy `http.Agent` implementation for HTTP",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "default": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TooTallNate/proxy-agents.git",
+    "directory": "packages/pac-proxy-agent"
+  },
+  "keywords": [
+    "pac",
+    "proxy",
+    "agent",
+    "http",
+    "https",
+    "socks",
+    "request",
+    "access"
+  ],
+  "author": "Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)",
+  "license": "MIT",
+  "dependencies": {
+    "debug": "^4.3.4",
+    "quickjs-wasi": "^2.2.0",
+    "agent-base": "9.0.0",
+    "get-uri": "8.0.1",
+    "pac-resolver": "9.0.1",
+    "https-proxy-agent": "9.1.0",
+    "http-proxy-agent": "9.1.0",
+    "socks-proxy-agent": "10.1.0"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.7",
+    "@types/node": "^22.13.0",
+    "async-listen": "^3.0.0",
+    "socksv5": "github:TooTallNate/socksv5#d937368b28e929396166d77a06d387a4a902bd51",
+    "typescript": "^5.1.6",
+    "tsconfig": "0.0.0",
+    "proxy": "4.1.0"
+  },
+  "engines": {
+    "node": ">= 20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "eslint --ext .ts",
+    "pack": "node ../../scripts/pack.mjs"
+  }
+}

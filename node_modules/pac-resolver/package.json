@@ -1,0 +1,50 @@
+{
+  "name": "pac-resolver",
+  "version": "9.0.1",
+  "type": "module",
+  "description": "Generates an asynchronous resolver function from a PAC file",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "default": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "netmask": "^2.0.2",
+    "degenerator": "7.0.1"
+  },
+  "devDependencies": {
+    "@types/netmask": "^1.0.30",
+    "@types/node": "^22.13.0",
+    "quickjs-wasi": "^2.2.0",
+    "typescript": "^5.1.6",
+    "tsconfig": "0.0.0"
+  },
+  "peerDependencies": {
+    "quickjs-wasi": "^2.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TooTallNate/proxy-agents.git",
+    "directory": "packages/pac-resolver"
+  },
+  "engines": {
+    "node": ">= 20"
+  },
+  "keywords": [
+    "pac",
+    "file",
+    "proxy",
+    "resolve",
+    "dns"
+  ],
+  "author": "Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "eslint . --ext .ts",
+    "pack": "node ../../scripts/pack.mjs"
+  }
+}

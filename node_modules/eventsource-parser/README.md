@@ -1,0 +1,177 @@
+# eventsource-parser
+
+[![npm version](https://npmx.dev/api/registry/badge/version/eventsource-parser)](https://npmx.dev/package/eventsource-parser) [![num dependendencies](https://npmx.dev/api/registry/badge/dependencies/eventsource-parser)](https://npmx.dev/package/eventsource-parser) [![npm weekly downloads](https://npmx.dev/api/registry/badge/downloads-week/eventsource-parser)](https://npmx.dev/package/eventsource-parser) [![install size](https://npmx.dev/api/registry/badge/size/eventsource-parser)](https://npmx.dev/package/eventsource-parser)
+
+A streaming parser for [server-sent events/eventsource](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), without any assumptions about how the actual stream of data is retrieved. It is intended to be a building block for [clients](https://github.com/rexxars/eventsource-client) and polyfills in javascript environments such as browsers, node.js and deno.
+
+If you are looking for a modern client implementation, see [eventsource-client](https://github.com/rexxars/eventsource-client).
+
+You create an instance of the parser, and _feed_ it chunks of data - partial or complete, and the parser emits parsed messages once it receives a complete message. A [TransformStream variant](#stream-usage) is also available for environments that support it (modern browsers, Node 22.12 and higher).
+
+Other modules in the EventSource family:
+
+- [eventsource](https://github.com/eventsource/eventsource): Cross-runtime polyfill for the WhatWG EventSource API.
+- [eventsource-encoder](https://github.com/rexxars/eventsource-encoder): encodes messages in the EventSource/Server-Sent Events format.
+- [eventsource-client](https://github.com/rexxars/eventsource-client): modern, feature rich eventsource client for browsers, node.js, bun, deno and other modern JavaScript environments.
+
+> [!NOTE]
+> Migrating from eventsource-parser 1.x/2.x? See the [migration guide](./MIGRATE-v3.md).
+
+## Installation
+
+```bash
+npm install --save eventsource-parser
+```
+
+## Usage
+
+```ts
+import {createParser, type EventSourceMessage} from 'eventsource-parser'
+
+function onEvent(event: EventSourceMessage) {
+  console.log('Received event!')
+  console.log('id: %s', event.id || '<none>')
+  console.log('event: %s', event.event || '<none>')
+  console.log('data: %s', event.data)
+}
+
+const parser = createParser({onEvent})
+const sseStream = getSomeReadableStream()
+
+for await (const chunk of sseStream) {
+  parser.feed(chunk)
+}
+
+// If you want to re-use the parser for a new stream of events, make sure to reset it!
+parser.reset()
+console.log('Done!')
+```
+
+### Event IDs
+
+Use `onId` if you need to track event IDs for reconnection. The parser calls it once when a blank
+line ends a block containing a valid `id` field. It runs for blocks with or without `data`, and it
+runs before `onEvent` when the same block produces an event. An empty `id` field is reported as an
+empty string. An `id` field containing U+0000 is ignored.
+
+```ts
+let lastEventId = ''
+
+const parser = createParser({
+  onId(id) {
+    lastEventId = id
+  },
+  onEvent(event) {
+    // …
+  },
+})
+```
+
+### Retry intervals
+
+If the server sends a `retry` field in the event stream, the parser will call any `onRetry` callback specified to the `createParser` function:
+
+```ts
+const parser = createParser({
+  onRetry(retryInterval) {
+    console.log('Server requested retry interval of %dms', retryInterval)
+  },
+  onEvent(event) {
+    // …
+  },
+})
+```
+
+### Parse errors
+
+If the parser encounters an error while parsing, it will call any `onError` callback provided to the `createParser` function:
+
+```ts
+import {type ParseError} from 'eventsource-parser'
+
+const parser = createParser({
+  onError(error: ParseError) {
+    console.error('Error parsing event:', error)
+    if (error.type === 'unknown-field') {
+      console.error('Field name:', error.field)
+      console.error('Field value:', error.value)
+      console.error('Line:', error.line)
+    } else if (error.type === 'invalid-retry') {
+      console.error('Invalid retry interval:', error.value)
+    }
+  },
+  onEvent(event) {
+    // …
+  },
+})
+```
+
+Note that `unknown-field` errors are emitted for completed invalid lines, not only data shaped as `field: value`. This is because the EventSource specification says to treat anything prior to a `:` as the field name. Incomplete lines that cannot become a valid SSE field may be discarded before completion to avoid unbounded buffering, in which case `onError` is not called and no `line`, `field`, or `value` is retained.
+
+> [!NOTE]
+> When encountering the end of a stream, calling `.reset({consume: true})` on the parser to flush any remaining data and reset the parser state. This will trigger the `onError` callback if the pending data has not already been discarded as an invalid line.
+
+### Comments
+
+The parser will ignore comments (lines starting with `:`) by default. If you want to handle comments, you can provide an `onComment` callback to the `createParser` function:
+
+```ts
+const parser = createParser({
+  onComment(comment) {
+    console.log('Received comment:', comment)
+  },
+  onEvent(event) {
+    // …
+  },
+})
+```
+
+> [!NOTE]
+> Leading whitespace is not stripped from comments, eg `: comment` will give ` comment` as the comment value, not `comment` (note the leading space).
+
+### Limiting buffered memory (`maxBufferSize`)
+
+By default the parser buffers valid partial lines and event data until a server completes an event. A server (or proxy) that starts a valid field and never terminates the line, or that keeps appending `data:` lines without ever sending a blank line to dispatch the event, can therefore grow the parser's buffers without bound. Lines that cannot become valid SSE fields are discarded without buffering.
+
+Pass a `maxBufferSize` (in characters) to `createParser` to cap this. If the combined size of the pending line buffer and the in-progress event's data buffer exceeds the limit, the parser emits a `ParseError` with `type: 'max-buffer-size-exceeded'` and becomes terminated: subsequent calls to `feed()` will throw until `reset()` is called.
+
+```ts
+const parser = createParser({
+  maxBufferSize: 1024 * 1024, // 1 MB
+  onEvent(event) {
+    // …
+  },
+  onError(error) {
+    if (error.type === 'max-buffer-size-exceeded') {
+      // Stream peer is misbehaving — typically you'd close the connection.
+    }
+  },
+})
+```
+
+The same option is available on the [stream variant](#stream-usage); the stream is always errored when this limit is exceeded, regardless of the `onError` setting (since the underlying parser is unrecoverable without a `reset()`).
+
+## Stream usage
+
+```ts
+import {EventSourceParserStream} from 'eventsource-parser/stream'
+
+const eventStream = response.body
+  .pipeThrough(new TextDecoderStream())
+  .pipeThrough(new EventSourceParserStream())
+```
+
+The stream constructor accepts a subset of the `createParser` options (`onComment`, `onId`, `onRetry`, `maxBufferSize`) plus an `onError` that can either be a function or set to `'terminate'` to error the stream on parse errors. Events are delivered through the stream itself rather than via an `onEvent` callback:
+
+```ts
+new EventSourceParserStream({
+  maxBufferSize: 1024 * 1024,
+  onError: 'terminate',
+})
+```
+
+Note that the TransformStream is exposed under a separate export (`eventsource-parser/stream`), in order to maximize compatibility with environments that do not have the `TransformStream` constructor available.
+
+## License
+
+MIT © [Espen Hovlandsdal](https://espen.codes/)
