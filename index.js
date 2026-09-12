@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
- * Otimizado: Clique inteligente por camada (elementFromPoint) + Tempo real (10ms) + Print direto em memória
+ * Otimizado: Clique inteligente por camada (elementFromPoint) + Redirecionamentos permitidos + Tempo real (10ms)
  */
 
 const puppeteer = require("puppeteer-core");
@@ -126,14 +126,11 @@ async function processarCliquesEmSequencia(page, listaCliques) {
     const y = Math.max(0, Math.floor(item.y));
 
     try {
-      // Move o mouse virtualmente para a coordenada
       await page.mouse.move(x, y);
 
-      // Executa varredura de camadas no DOM para acertar exatamente o elemento correto
       const clicou = await page.evaluate((px, py) => {
         const el = document.elementFromPoint(px, py);
         if (el) {
-          // Tenta focar e disparar o clique direto via JS no elemento da camada superior
           el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
           el.click();
           return true;
@@ -142,7 +139,6 @@ async function processarCliquesEmSequencia(page, listaCliques) {
       }, x, y);
 
       if (!clicou) {
-        // Fallback caso o elementFromPoint falhe
         await page.mouse.click(x, y);
       }
 
@@ -168,13 +164,12 @@ function iniciarObservadorDeCliques(page) {
       if (dadosClick) {
         const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
         if (listaCliques.length > 0) {
-          // Apaga imediatamente do Firebase para evitar reprocessamento
           await firebasePut(URL_CLICK, null);
           await processarCliquesEmSequencia(page, listaCliques);
         }
       }
     } catch (err) {
-      // Ignora erros pontuais de conexão
+      // Ignora erros pontuais
     } finally {
       processando = false;
     }
@@ -239,12 +234,34 @@ async function executar() {
       "--disable-gpu",
       "--single-process",
       "--disable-extensions",
-      "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable"
+      "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
+      "--disable-web-security",
+      "--allow-running-insecure-content"
     ]
   });
 
   const page = await browser.newPage();
   
+  // Configuração para aceitar pop-ups e redirecionamentos para a mesma página principal
+  await page.setBypassCSP(true);
+  
+  // Intercepta tentativas de abrir novas abas (_blank) e força a navegação na página principal atual
+  page.on('targetcreated', async (target) => {
+    try {
+      const newPage = await target.page();
+      if (newPage && newPage !== page) {
+        const targetUrl = newPage.url();
+        if (targetUrl && targetUrl !== 'about:blank') {
+          console.log(`🔀 Redirecionando aba nova para a página principal: ${targetUrl}`);
+          await newPage.close();
+          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        }
+      }
+    } catch (e) {
+      // Ignora falhas ao capturar alvo
+    }
+  });
+
   const larguraViewport = 1280;
   const alturaViewport = 720;
   await page.setViewport({ width: larguraViewport, height: alturaViewport });
@@ -262,12 +279,17 @@ async function executar() {
   await injetarScriptDoFirebase(page);
   console.log("✅ Sessão ativa + Firebase dinâmico conectado.");
 
-  // Inicia o observador separado de cliques em tempo real (10ms)
   iniciarObservadorDeCliques(page);
 
-  // Loop principal dedicado apenas a URLs, Textos e Prints
   while (true) {
     try {
+      // Atualiza o estado da URL atual caso o navegador tenha redirecionado sozinho internamente
+      const urlAtualNoBrowser = page.url();
+      if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
+        ultimaURL = urlAtualNoBrowser;
+        await firebasePut(URL_U, ultimaURL);
+      }
+
       const rawNovaUrl = await firebaseGet(URL_U);
       if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
         const novaUrl = corrigirUrl(rawNovaUrl);
