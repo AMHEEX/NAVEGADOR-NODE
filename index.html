@@ -593,20 +593,17 @@
             try { floatingContainer.releasePointerCapture(e.pointerId); } catch (err) {}
         });
 
-        // Clique corrigido usando o tamanho exato da imagem real exibida, ajustando perfeitamente a proporção ao virar a tela
+        // Clique calculado estritamente sobre a imagem exibida (com tratamento de escala correto)
         imgTela.addEventListener("click", async (event) => {
             if (!acessoLiberado || !imgTela.naturalWidth || !imgTela.naturalHeight) return;
 
             const rect = imgTela.getBoundingClientRect();
             
-            // Posição do clique relativa estritamente à área visível da imagem na tela
             const xRelativo = event.clientX - rect.left;
             const yRelativo = event.clientY - rect.top;
 
-            // Ignora cliques fora dos limites reais da imagem (devido ao object-fit: contain)
             if (xRelativo < 0 || xRelativo > rect.width || yRelativo < 0 || yRelativo > rect.height) return;
 
-            // Mapeia proporcionalmente para a resolução interna original da imagem do Puppeteer (1280x720)
             const escalaX = imgTela.naturalWidth / rect.width;
             const escalaY = imgTela.naturalHeight / rect.height;
 
@@ -664,7 +661,7 @@
             menuFlutuante.style.display = "none";
             iconFlutuante.style.display = "block";
 
-updateModalInput({
+            mostrarModalInput({
                 titulo: "📜 Injetar Script JS (S1)",
                 tipo: "textarea",
                 placeholder: "Cole o código JavaScript...",
