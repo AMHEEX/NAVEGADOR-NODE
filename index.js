@@ -1,5 +1,5 @@
 /**
- * NAVEGADOR HEADLESS + FIREBASE DINÂMICO
+ * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
  * Controlado pelo HTML do painel
  */
 
@@ -10,20 +10,40 @@ const https = require("https");
 const http = require("http");
 
 // ===================================
-// CONFIGURAÇÃO DO SERVIDOR E IP DINÂMICO
+// FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
+// ===================================
+function obterIpAtual() {
+  return new Promise((resolve) => {
+    https.get("https://api.ipify.org?format=json", (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          if (json && json.ip) {
+            // Substitui pontos por traços para usar como chave válida no Firebase (ex: 177-18-100-50)
+            const ipFormatado = json.ip.replace(/\./g, "-");
+            resolve(ipFormatado);
+          } else {
+            resolve("instancia_fallback");
+          }
+        } catch (e) {
+          resolve("instancia_fallback");
+        }
+      });
+    }).on("error", () => {
+      resolve("instancia_fallback");
+    });
+  });
+}
+
+// ===================================
+// CONFIGURAÇÃO DO SERVIDOR E FIREBASE
 // ===================================
 const BASE_SERVIDOR = "https://amheex-default-rtdb.firebaseio.com";
-const IP_ATUAL = "instancia_1"; // Defina o identificador/IP único desta instância se necessário
 
-// Rotas dinâmicas baseadas em: servidor/NAVEGADOR-NODE/IP_ATUAL/FUNÇÃO
-const CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${IP_ATUAL}`;
-
-const URL_X = `${CAMINHO_BASE}/X1.json`;
-const URL_Y = `${CAMINHO_BASE}/Y1.json`;
-const URL_U = `${CAMINHO_BASE}/U1.json`;
-const URL_T = `${CAMINHO_BASE}/T1.json`;
-const URL_P = `${CAMINHO_BASE}/P1.json`;
-const URL_S = `${CAMINHO_BASE}/S1.json`; // Chave para o script injetado diretamente
+let CAMINHO_BASE = "";
+let URL_X, URL_Y, URL_U, URL_T, URL_P, URL_S;
 
 // ===================================
 // DIRS
@@ -152,6 +172,22 @@ async function injetarScriptDoFirebase(page) {
 // PRINCIPAL
 // ===================================
 async function executar() {
+  console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
+  const ipAtual = await obterIpAtual();
+  
+  // Define o caminho dinâmico com base no IP público atual da internet
+  CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${ipAtual}`;
+
+  URL_X = `${CAMINHO_BASE}/X1.json`;
+  URL_Y = `${CAMINHO_BASE}/Y1.json`;
+  URL_U = `${CAMINHO_BASE}/U1.json`;
+  URL_T = `${CAMINHO_BASE}/T1.json`;
+  URL_P = `${CAMINHO_BASE}/P1.json`;
+  URL_S = `${CAMINHO_BASE}/S1.json`;
+
+  console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
+  console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
+
   const chromiumPath = "/data/data/com.termux/files/usr/bin/chromium-browser";
 
   const browser = await puppeteer.launch({
@@ -171,17 +207,16 @@ async function executar() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
 
-  let ultimaURL = "https://amheex.onrender.com";
+  let ultimaURL = "https://google.com";
   let ultimoX = null;
   let ultimoY = null;
 
-  console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
-  console.log("🌐 Abrindo página inicial...");
+  console.log(`🌐 Abrindo página inicial: ${ultimaURL}`);
   
   try {
     await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 60000 });
   } catch (err) {
-    console.log("⚠️ Falha na página inicial:", err.message);
+    console.log("⚠️ Falha ao abrir página inicial:", err.message);
   }
 
   await injetarScriptDoFirebase(page);
