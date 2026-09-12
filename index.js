@@ -1,11 +1,9 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
- * Controlado pelo HTML do painel
+ * Otimizado: Sem gravação de arquivo físico de print e cliques em tempo real (ms)
  */
 
 const puppeteer = require("puppeteer-core");
-const fs = require("fs");
-const path = require("path");
 const https = require("https");
 const http = require("http");
 
@@ -42,18 +40,7 @@ function obterIpAtual() {
 const BASE_SERVIDOR = "https://amheex-default-rtdb.firebaseio.com";
 
 let CAMINHO_BASE = "";
-let URL_X, URL_Y, URL_U, URL_T, URL_P, URL_S;
-
-// ===================================
-// DIRS
-// ===================================
-const BASE_DIR = __dirname;
-const ASSETS_DIR = path.join(BASE_DIR, "assets");
-const IMAGE_PATH = path.join(ASSETS_DIR, "index.png");
-
-if (!fs.existsSync(ASSETS_DIR)) {
-  fs.mkdirSync(ASSETS_DIR, { recursive: true });
-}
+let URL_CLICK, URL_U, URL_T, URL_P, URL_S;
 
 // ===================================
 // CORRETOR INTELIGENTE DE URL
@@ -127,31 +114,23 @@ function firebasePut(url, value) {
 }
 
 // ===================================
-// CLIQUE INTELIGENTE COM VALIDAÇÃO DE ELEMENTO
+// EXECUÇÃO DE SEQUÊNCIA DE CLIQUES
 // ===================================
-async function clickAt(page, x, y) {
-  try {
-    // Valida se existe um elemento clicável real nas coordenadas informadas para evitar clique no vazio
-    const elementoValido = await page.evaluate((px, py) => {
-      const el = document.elementFromPoint(px, py);
-      if (!el) return false;
-      // Verifica se o elemento ou seus pais diretos são interativos ou se a tag é válida
-      const tag = el.tagName.toLowerCase();
-      const tagsIgnoradas = ["html", "body"];
-      if (tagsIgnoradas.includes(tag)) {
-        // Verifica se realmente possui algum handler ou estilo de cursor pointer
-        const estilo = window.getComputedStyle(el);
-        if (estilo.cursor !== "pointer" && !el.onclick && !el.getAttribute("role")) {
-          return false; 
-        }
-      }
-      return true;
-    }, x, y);
+async function processarCliquesEmSequencia(page, listaCliques) {
+  if (!Array.isArray(listaCliques) || listaCliques.length === 0) return;
 
-    await page.mouse.click(x, y);
-    console.log(`🖱 Clique efetuado → X=${x} Y=${y} (Elemento válido: ${elementoValido})`);
-  } catch (e) {
-    console.log("Erro no clique:", e.message);
+  for (const item of listaCliques) {
+    if (!item || typeof item.x !== "number" || typeof item.y !== "number") continue;
+
+    const x = Math.max(0, Math.floor(item.x));
+    const y = Math.max(0, Math.floor(item.y));
+
+    try {
+      await page.mouse.click(x, y);
+      console.log(`🖱 Clique em tempo real → X=${x} Y=${y}`);
+    } catch (e) {
+      console.log(`Erro no clique X=${x} Y=${y}:`, e.message);
+    }
   }
 }
 
@@ -192,8 +171,7 @@ async function executar() {
   
   CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${ipAtual}`;
 
-  URL_X = `${CAMINHO_BASE}/X1.json`;
-  URL_Y = `${CAMINHO_BASE}/Y1.json`;
+  URL_CLICK = `${CAMINHO_BASE}/CLICK.json`;
   URL_U = `${CAMINHO_BASE}/U1.json`;
   URL_T = `${CAMINHO_BASE}/T1.json`;
   URL_P = `${CAMINHO_BASE}/P1.json`;
@@ -220,14 +198,11 @@ async function executar() {
 
   const page = await browser.newPage();
   
-  // Definimos a viewport padrão base
   const larguraViewport = 1280;
   const alturaViewport = 720;
   await page.setViewport({ width: larguraViewport, height: alturaViewport });
 
   let ultimaURL = "https://google.com";
-  let ultimoX = null;
-  let ultimoY = null;
 
   console.log(`🌐 Abrindo página inicial: ${ultimaURL}`);
   
@@ -242,51 +217,33 @@ async function executar() {
 
   while (true) {
     try {
-      // 1. Verifica mudança de URL com correção inteligente
+      // 1. Verificação contínua e ultra-rápida de cliques (Tempo Real - ms)
+      const dadosClick = await firebaseGet(URL_CLICK);
+      if (dadosClick) {
+        const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
+        if (listaCliques.length > 0) {
+          // Apaga imediatamente do Firebase antes de processar para evitar duplicidade
+          await firebasePut(URL_CLICK, null);
+          await processarCliquesEmSequencia(page, listaCliques);
+        }
+      }
+
+      // 2. Verifica mudança de URL com correção inteligente
       const rawNovaUrl = await firebaseGet(URL_U);
       if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
         const novaUrl = corrigirUrl(rawNovaUrl);
 
         if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
-          console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl} (Original: ${rawNovaUrl})`);
-          
+          console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
           try {
             await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
             ultimaURL = novaUrl;
             await firebasePut(URL_U, "");
-
             await injetarScriptDoFirebase(page);
           } catch (navErr) {
-            console.error("❌ Erro de navegação para a URL:", novaUrl, "-", navErr.message);
+            console.error("❌ Erro de navegação:", navErr.message);
             await firebasePut(URL_U, "");
           }
-        }
-      }
-
-      await injetarScriptDoFirebase(page);
-
-      // 2. Lê coordenadas de clique e valida
-      const rawX = await firebaseGet(URL_X);
-      const rawY = await firebaseGet(URL_Y);
-
-      const x = Number(rawX);
-      const y = Number(rawY);
-
-      if (!isNaN(x) && !isNaN(y) && x > 0 && y > 0) {
-        if (x !== ultimoX || y !== ultimoY) {
-          ultimoX = x;
-          ultimoY = y;
-          
-          // Assegura que as coordenadas estão dentro dos limites da tela do navegador
-          const xLimitado = Math.max(0, Math.min(x, larguraViewport));
-          const yLimitado = Math.max(0, Math.min(y, alturaViewport));
-
-          await clickAt(page, xLimitado, yLimitado);
-
-          await firebasePut(URL_X, 0);
-          await firebasePut(URL_Y, 0);
-          ultimoX = null;
-          ultimoY = null;
         }
       }
 
@@ -298,20 +255,19 @@ async function executar() {
         await firebasePut(URL_T, "");
       }
 
-      // 4. Tira print e envia Base64 para o Firebase
+      // 4. Print em Base64 direto na memória (sem salvar arquivo físico local)
       if (!page.isClosed()) {
-        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 70 });
+        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 65 });
         const base64 = "data:image/jpeg;base64," + screenshotBuffer;
-
         await firebasePut(URL_P, base64);
-        fs.writeFileSync(IMAGE_PATH, Buffer.from(screenshotBuffer, "base64"));
       }
 
     } catch (err) {
       console.error("Erro no loop:", err.message);
     }
 
-    await new Promise(r => setTimeout(r, 800));
+    // Intervalo reduzido ao máximo para agilizar a leitura em tempo real dos cliques
+    await new Promise(r => setTimeout(r, 50));
   }
 }
 
