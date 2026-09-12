@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
- * Otimizado: Clique inteligente por camada (elementFromPoint) + Redirecionamentos permitidos + Tempo real (10ms)
+ * Otimizado: Método de clique unificado + Redirecionamentos permitidos + Tempo real (10ms)
  */
 
 const puppeteer = require("puppeteer-core");
@@ -114,38 +114,83 @@ function firebasePut(url, value) {
 }
 
 // ===================================
-// EXECUÇÃO DE CLIQUES COM CORREÇÃO DE CAMADAS
+// MÉTODO UNIFICADO DE CLIQUE (ÚNICA AÇÃO)
 // ===================================
+async function processarCliqueUnico(page, x, y) {
+  const px = Math.max(0, Math.floor(x));
+  const py = Math.max(0, Math.floor(y));
+
+  try {
+    // Posiciona o cursor do mouse virtualmente
+    await page.mouse.move(px, py);
+
+    // Executa toda a cadeia de eventos de clique e toque de forma unificada no elemento da camada atual
+    const acaoExecutada = await page.evaluate((xCoord, yCoord) => {
+      const elemento = document.elementFromPoint(xCoord, yCoord);
+      if (!elemento) return false;
+
+      const opts = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: xCoord,
+        clientY: yCoord,
+        screenX: xCoord,
+        screenY: yCoord
+      };
+
+      // Dispara eventos de mouse em cascata
+      elemento.dispatchEvent(new MouseEvent('mouseover', opts));
+      elemento.dispatchEvent(new MouseEvent('mousedown', opts));
+      elemento.focus({ preventScroll: true });
+      elemento.dispatchEvent(new MouseEvent('mouseup', opts));
+      elemento.dispatchEvent(new MouseEvent('click', opts));
+
+      // Disparadores extras de toque (Touch Events) para telas e elementos mobile
+      if (typeof TouchEvent !== 'undefined') {
+        try {
+          const touch = new Touch({
+            identifier: Date.now(),
+            target: elemento,
+            clientX: xCoord,
+            clientY: yCoord,
+            radiusX: 2.5,
+            radiusY: 2.5,
+            rotationAngle: 0,
+            force: 1
+          });
+          const touchOpts = { cancelable: true, bubbles: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] };
+          elemento.dispatchEvent(new TouchEvent('touchstart', touchOpts));
+          elemento.dispatchEvent(new TouchEvent('touchend', touchOpts));
+        } catch (e) {}
+      }
+
+      // Executa o clique nativo do elemento se disponível
+      if (typeof elemento.click === 'function') {
+        elemento.click();
+      }
+
+      return true;
+    }, px, py);
+
+    // Fallback nativo caso o elementFromPoint retorne nulo
+    if (!acaoExecutada) {
+      await page.mouse.down();
+      await page.mouse.up();
+    }
+
+    console.log(`🖱 Clique único unificado executado → X=${px} Y=${py}`);
+  } catch (e) {
+    console.log(`Erro no clique único X=${px} Y=${py}:`, e.message);
+  }
+}
+
 async function processarCliquesEmSequencia(page, listaCliques) {
   if (!Array.isArray(listaCliques) || listaCliques.length === 0) return;
 
   for (const item of listaCliques) {
     if (!item || typeof item.x !== "number" || typeof item.y !== "number") continue;
-
-    const x = Math.max(0, Math.floor(item.x));
-    const y = Math.max(0, Math.floor(item.y));
-
-    try {
-      await page.mouse.move(x, y);
-
-      const clicou = await page.evaluate((px, py) => {
-        const el = document.elementFromPoint(px, py);
-        if (el) {
-          el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
-          el.click();
-          return true;
-        }
-        return false;
-      }, x, y);
-
-      if (!clicou) {
-        await page.mouse.click(x, y);
-      }
-
-      console.log(`🖱 Clique exato por camada → X=${x} Y=${y}`);
-    } catch (e) {
-      console.log(`Erro no clique X=${x} Y=${y}:`, e.message);
-    }
+    await processarCliqueUnico(page, item.x, item.y);
   }
 }
 
@@ -242,10 +287,8 @@ async function executar() {
 
   const page = await browser.newPage();
   
-  // Configuração para aceitar pop-ups e redirecionamentos para a mesma página principal
   await page.setBypassCSP(true);
   
-  // Intercepta tentativas de abrir novas abas (_blank) e força a navegação na página principal atual
   page.on('targetcreated', async (target) => {
     try {
       const newPage = await target.page();
@@ -257,9 +300,7 @@ async function executar() {
           await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
         }
       }
-    } catch (e) {
-      // Ignora falhas ao capturar alvo
-    }
+    } catch (e) {}
   });
 
   const larguraViewport = 1280;
@@ -283,7 +324,6 @@ async function executar() {
 
   while (true) {
     try {
-      // Atualiza o estado da URL atual caso o navegador tenha redirecionado sozinho internamente
       const urlAtualNoBrowser = page.url();
       if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
         ultimaURL = urlAtualNoBrowser;
