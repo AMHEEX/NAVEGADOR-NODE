@@ -383,7 +383,7 @@
 
         let IP_ATUAL = "";
         let CAMINHO_BASE = "";
-        let URL_X, URL_Y, URL_U, URL_T, URL_P, URL_O, URL_S;
+        let URL_CLICK, URL_U, URL_T, URL_P, URL_O, URL_S;
 
         const imgTela = document.getElementById("telaRemota");
         const menuFlutuante = document.getElementById("arenax1-menu");
@@ -399,8 +399,8 @@
         const modalConfirm = document.getElementById("ax1ModalConfirm");
 
         let acessoLiberado = false;
+        let filaCliques = [];
 
-        // Função auxiliar para converter o formato string YYYYMMDDHHMM em Objeto Date
         function converterTempoServidorParaDate(strTempo) {
             if (!strTempo || strTempo.length < 12) return null;
             const ano = parseInt(strTempo.substring(0, 4), 10);
@@ -421,7 +421,6 @@
                     const chaves = Object.keys(dadosServidor);
                     const agora = new Date();
                     
-                    // Varre os nós para encontrar especificamente o que ESTÁ EXPIRADO (ou inativo há mais de 2 minutos)
                     for (let chave of chaves) {
                         mensagemStatus.textContent = `Verificando nó: ${chave.replace(/-/g, ".")}...`;
                         
@@ -430,20 +429,17 @@
                             const tempoServidorStr = await resO.json();
                             const dataNo = converterTempoServidorParaDate(tempoServidorStr);
 
-                            // Se não tiver data ou se a diferença for maior que 2 minutos (considerado expirado/travado)
                             if (!dataNo || (agora - dataNo) > 120000) {
                                 IP_ATUAL = chave;
                                 mensagemStatus.textContent = `Nó expirado encontrado: ${IP_ATUAL.replace(/-/g, ".")}. Entrando...`;
                                 break;
                             }
                         } catch (err) {
-                            // Se der erro ao ler o tempo daquele nó, assume ele como alvo de entrada
                             IP_ATUAL = chave;
                             break;
                         }
                     }
 
-                    // Se todos estiverem ativos e nenhum expirado, pega o primeiro como padrão para não travar
                     if (!IP_ATUAL && chaves.length > 0) {
                         IP_ATUAL = chaves[0];
                         mensagemStatus.textContent = `Nenhum expirado. Entrando no primeiro: ${IP_ATUAL.replace(/-/g, ".")}`;
@@ -457,8 +453,7 @@
             }
 
             CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${IP_ATUAL}`;
-            URL_X = `${CAMINHO_BASE}/X1.json`;
-            URL_Y = `${CAMINHO_BASE}/Y1.json`;
+            URL_CLICK = `${CAMINHO_BASE}/CLICK.json`;
             URL_U = `${CAMINHO_BASE}/U1.json`;
             URL_T = `${CAMINHO_BASE}/T1.json`;
             URL_P = `${CAMINHO_BASE}/P1.json`;
@@ -598,21 +593,34 @@
             try { floatingContainer.releasePointerCapture(e.pointerId); } catch (err) {}
         });
 
+        // Clique corrigido usando o tamanho exato da imagem real exibida, ajustando perfeitamente a proporção ao virar a tela
         imgTela.addEventListener("click", async (event) => {
             if (!acessoLiberado || !imgTela.naturalWidth || !imgTela.naturalHeight) return;
 
             const rect = imgTela.getBoundingClientRect();
+            
+            // Posição do clique relativa estritamente à área visível da imagem na tela
+            const xRelativo = event.clientX - rect.left;
+            const yRelativo = event.clientY - rect.top;
+
+            // Ignora cliques fora dos limites reais da imagem (devido ao object-fit: contain)
+            if (xRelativo < 0 || xRelativo > rect.width || yRelativo < 0 || yRelativo > rect.height) return;
+
+            // Mapeia proporcionalmente para a resolução interna original da imagem do Puppeteer (1280x720)
             const escalaX = imgTela.naturalWidth / rect.width;
             const escalaY = imgTela.naturalHeight / rect.height;
 
-            const x = Math.floor((event.clientX - rect.left) * escalaX);
-            const y = Math.floor((event.clientY - rect.top) * escalaY);
+            const x = Math.floor(xRelativo * escalaX);
+            const y = Math.floor(yRelativo * escalaY);
+
+            filaCliques.push({ x: x, y: y });
 
             try {
-                await Promise.all([
-                    fetch(URL_X, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(x) }),
-                    fetch(URL_Y, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(y) })
-                ]);
+                await fetch(URL_CLICK, { 
+                    method: "PUT", 
+                    headers: { "Content-Type": "application/json" }, 
+                    body: JSON.stringify(filaCliques) 
+                });
             } catch (e) {}
         });
 
@@ -656,7 +664,7 @@
             menuFlutuante.style.display = "none";
             iconFlutuante.style.display = "block";
 
-            mostrarModalInput({
+updateModalInput({
                 titulo: "📜 Injetar Script JS (S1)",
                 tipo: "textarea",
                 placeholder: "Cole o código JavaScript...",
