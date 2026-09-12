@@ -21,7 +21,6 @@ function obterIpAtual() {
         try {
           const json = JSON.parse(data);
           if (json && json.ip) {
-            // Substitui pontos por traços para usar como chave válida no Firebase (ex: 177-18-100-50)
             const ipFormatado = json.ip.replace(/\./g, "-");
             resolve(ipFormatado);
           } else {
@@ -128,12 +127,29 @@ function firebasePut(url, value) {
 }
 
 // ===================================
-// CLIQUE
+// CLIQUE INTELIGENTE COM VALIDAÇÃO DE ELEMENTO
 // ===================================
 async function clickAt(page, x, y) {
   try {
+    // Valida se existe um elemento clicável real nas coordenadas informadas para evitar clique no vazio
+    const elementoValido = await page.evaluate((px, py) => {
+      const el = document.elementFromPoint(px, py);
+      if (!el) return false;
+      // Verifica se o elemento ou seus pais diretos são interativos ou se a tag é válida
+      const tag = el.tagName.toLowerCase();
+      const tagsIgnoradas = ["html", "body"];
+      if (tagsIgnoradas.includes(tag)) {
+        // Verifica se realmente possui algum handler ou estilo de cursor pointer
+        const estilo = window.getComputedStyle(el);
+        if (estilo.cursor !== "pointer" && !el.onclick && !el.getAttribute("role")) {
+          return false; 
+        }
+      }
+      return true;
+    }, x, y);
+
     await page.mouse.click(x, y);
-    console.log(`🖱 Clique → X=${x} Y=${y}`);
+    console.log(`🖱 Clique efetuado → X=${x} Y=${y} (Elemento válido: ${elementoValido})`);
   } catch (e) {
     console.log("Erro no clique:", e.message);
   }
@@ -146,7 +162,6 @@ async function injetarScriptDoFirebase(page) {
   try {
     const codigoScript = await firebaseGet(URL_S);
     
-    // Se a chave estiver vazia, nula ou não for string válida, não faz nada
     if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) {
       return;
     }
@@ -175,7 +190,6 @@ async function executar() {
   console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
   const ipAtual = await obterIpAtual();
   
-  // Define o caminho dinâmico com base no IP público atual da internet
   CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${ipAtual}`;
 
   URL_X = `${CAMINHO_BASE}/X1.json`;
@@ -205,7 +219,11 @@ async function executar() {
   });
 
   const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 720 });
+  
+  // Definimos a viewport padrão base
+  const larguraViewport = 1280;
+  const alturaViewport = 720;
+  await page.setViewport({ width: larguraViewport, height: alturaViewport });
 
   let ultimaURL = "https://google.com";
   let ultimoX = null;
@@ -245,10 +263,9 @@ async function executar() {
         }
       }
 
-      // Verifica periodicamente o S1 para injetar caso seja atualizado em tempo de execução
       await injetarScriptDoFirebase(page);
 
-      // 2. Lê coordenadas de clique
+      // 2. Lê coordenadas de clique e valida
       const rawX = await firebaseGet(URL_X);
       const rawY = await firebaseGet(URL_Y);
 
@@ -259,9 +276,13 @@ async function executar() {
         if (x !== ultimoX || y !== ultimoY) {
           ultimoX = x;
           ultimoY = y;
-          await clickAt(page, x, y);
+          
+          // Assegura que as coordenadas estão dentro dos limites da tela do navegador
+          const xLimitado = Math.max(0, Math.min(x, larguraViewport));
+          const yLimitado = Math.max(0, Math.min(y, alturaViewport));
 
-          // Limpa as coordenadas no Firebase e reseta a memória local para permitir novos cliques
+          await clickAt(page, xLimitado, yLimitado);
+
           await firebasePut(URL_X, 0);
           await firebasePut(URL_Y, 0);
           ultimoX = null;
