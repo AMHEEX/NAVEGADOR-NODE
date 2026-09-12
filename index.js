@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
- * Otimizado: Sem gravação de arquivo físico de print e cliques em tempo real (ms)
+ * Otimizado: Loop de cliques dedicado a cada 10ms (Tempo Real absoluto) + Print direto em memória
  */
 
 const puppeteer = require("puppeteer-core");
@@ -114,7 +114,7 @@ function firebasePut(url, value) {
 }
 
 // ===================================
-// EXECUÇÃO DE SEQUÊNCIA DE CLIQUES
+// EXECUÇÃO DE CLIQUES EM TEMPO REAL
 // ===================================
 async function processarCliquesEmSequencia(page, listaCliques) {
   if (!Array.isArray(listaCliques) || listaCliques.length === 0) return;
@@ -127,11 +127,39 @@ async function processarCliquesEmSequencia(page, listaCliques) {
 
     try {
       await page.mouse.click(x, y);
-      console.log(`🖱 Clique em tempo real → X=${x} Y=${y}`);
+      console.log(`🖱 Clique instantâneo → X=${x} Y=${y}`);
     } catch (e) {
       console.log(`Erro no clique X=${x} Y=${y}:`, e.message);
     }
   }
+}
+
+// ===================================
+// LOOP EXCLUSIVO DE CLIQUE EM TEMPO REAL (10ms)
+// ===================================
+function iniciarObservadorDeCliques(page) {
+  let processando = false;
+
+  setInterval(async () => {
+    if (processando || !URL_CLICK || page.isClosed()) return;
+    processando = true;
+
+    try {
+      const dadosClick = await firebaseGet(URL_CLICK);
+      if (dadosClick) {
+        const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
+        if (listaCliques.length > 0) {
+          // Apaga imediatamente do Firebase para evitar reprocessamento
+          await firebasePut(URL_CLICK, null);
+          await processarCliquesEmSequencia(page, listaCliques);
+        }
+      }
+    } catch (err) {
+      // Ignora pequenos erros de rede pontuais para não travar o loop
+    } finally {
+      processando = false;
+    }
+  }, 10); // Verifica o Firebase a cada 10 milissegundos
 }
 
 // ===================================
@@ -215,20 +243,13 @@ async function executar() {
   await injetarScriptDoFirebase(page);
   console.log("✅ Sessão ativa + Firebase dinâmico conectado.");
 
+  // Inicia o observador separado de cliques em tempo real (10ms)
+  iniciarObservadorDeCliques(page);
+
+  // Loop principal dedicado apenas a URLs, Textos e Prints
   while (true) {
     try {
-      // 1. Verificação contínua e ultra-rápida de cliques (Tempo Real - ms)
-      const dadosClick = await firebaseGet(URL_CLICK);
-      if (dadosClick) {
-        const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
-        if (listaCliques.length > 0) {
-          // Apaga imediatamente do Firebase antes de processar para evitar duplicidade
-          await firebasePut(URL_CLICK, null);
-          await processarCliquesEmSequencia(page, listaCliques);
-        }
-      }
-
-      // 2. Verifica mudança de URL com correção inteligente
+      // 1. Verifica mudança de URL com correção inteligente
       const rawNovaUrl = await firebaseGet(URL_U);
       if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
         const novaUrl = corrigirUrl(rawNovaUrl);
@@ -247,7 +268,7 @@ async function executar() {
         }
       }
 
-      // 3. Texto para input
+      // 2. Texto para input
       const texto = await firebaseGet(URL_T);
       if (typeof texto === "string" && texto.length > 0) {
         await page.keyboard.type(texto);
@@ -255,7 +276,7 @@ async function executar() {
         await firebasePut(URL_T, "");
       }
 
-      // 4. Print em Base64 direto na memória (sem salvar arquivo físico local)
+      // 3. Print em Base64 direto na memória (sem salvar arquivo físico local)
       if (!page.isClosed()) {
         const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 65 });
         const base64 = "data:image/jpeg;base64," + screenshotBuffer;
@@ -266,8 +287,8 @@ async function executar() {
       console.error("Erro no loop:", err.message);
     }
 
-    // Intervalo reduzido ao máximo para agilizar a leitura em tempo real dos cliques
-    await new Promise(r => setTimeout(r, 50));
+    // Intervalo do loop geral de prints e URLs
+    await new Promise(r => setTimeout(r, 600));
   }
 }
 
