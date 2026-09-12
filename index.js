@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
- * Otimizado: Loop de cliques dedicado a cada 10ms (Tempo Real absoluto) + Print direto em memória
+ * Otimizado: Clique inteligente por camada (elementFromPoint) + Tempo real (10ms) + Print direto em memória
  */
 
 const puppeteer = require("puppeteer-core");
@@ -114,7 +114,7 @@ function firebasePut(url, value) {
 }
 
 // ===================================
-// EXECUÇÃO DE CLIQUES EM TEMPO REAL
+// EXECUÇÃO DE CLIQUES COM CORREÇÃO DE CAMADAS
 // ===================================
 async function processarCliquesEmSequencia(page, listaCliques) {
   if (!Array.isArray(listaCliques) || listaCliques.length === 0) return;
@@ -126,8 +126,27 @@ async function processarCliquesEmSequencia(page, listaCliques) {
     const y = Math.max(0, Math.floor(item.y));
 
     try {
-      await page.mouse.click(x, y);
-      console.log(`🖱 Clique instantâneo → X=${x} Y=${y}`);
+      // Move o mouse virtualmente para a coordenada
+      await page.mouse.move(x, y);
+
+      // Executa varredura de camadas no DOM para acertar exatamente o elemento correto
+      const clicou = await page.evaluate((px, py) => {
+        const el = document.elementFromPoint(px, py);
+        if (el) {
+          // Tenta focar e disparar o clique direto via JS no elemento da camada superior
+          el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+          el.click();
+          return true;
+        }
+        return false;
+      }, x, y);
+
+      if (!clicou) {
+        // Fallback caso o elementFromPoint falhe
+        await page.mouse.click(x, y);
+      }
+
+      console.log(`🖱 Clique exato por camada → X=${x} Y=${y}`);
     } catch (e) {
       console.log(`Erro no clique X=${x} Y=${y}:`, e.message);
     }
@@ -155,11 +174,11 @@ function iniciarObservadorDeCliques(page) {
         }
       }
     } catch (err) {
-      // Ignora pequenos erros de rede pontuais para não travar o loop
+      // Ignora erros pontuais de conexão
     } finally {
       processando = false;
     }
-  }, 10); // Verifica o Firebase a cada 10 milissegundos
+  }, 10);
 }
 
 // ===================================
@@ -249,7 +268,6 @@ async function executar() {
   // Loop principal dedicado apenas a URLs, Textos e Prints
   while (true) {
     try {
-      // 1. Verifica mudança de URL com correção inteligente
       const rawNovaUrl = await firebaseGet(URL_U);
       if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
         const novaUrl = corrigirUrl(rawNovaUrl);
@@ -268,7 +286,6 @@ async function executar() {
         }
       }
 
-      // 2. Texto para input
       const texto = await firebaseGet(URL_T);
       if (typeof texto === "string" && texto.length > 0) {
         await page.keyboard.type(texto);
@@ -276,7 +293,6 @@ async function executar() {
         await firebasePut(URL_T, "");
       }
 
-      // 3. Print em Base64 direto na memória (sem salvar arquivo físico local)
       if (!page.isClosed()) {
         const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 65 });
         const base64 = "data:image/jpeg;base64," + screenshotBuffer;
@@ -287,7 +303,6 @@ async function executar() {
       console.error("Erro no loop:", err.message);
     }
 
-    // Intervalo do loop geral de prints e URLs
     await new Promise(r => setTimeout(r, 600));
   }
 }
