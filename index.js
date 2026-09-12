@@ -1,11 +1,13 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
- * Otimizado: Método de clique unificado + Redirecionamentos permitidos + Tempo real (10ms)
+ * Otimizado: Salvando perfil, cache e dados na pasta compartilhada da memória interna.
  */
 
 const puppeteer = require("puppeteer-core");
 const https = require("https");
 const http = require("http");
+const path = require("path");
+const fs = require("fs");
 
 // ===================================
 // FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
@@ -121,10 +123,8 @@ async function processarCliqueUnico(page, x, y) {
   const py = Math.max(0, Math.floor(y));
 
   try {
-    // Posiciona o cursor do mouse virtualmente
     await page.mouse.move(px, py);
 
-    // Executa toda a cadeia de eventos de clique e toque de forma unificada no elemento da camada atual
     const acaoExecutada = await page.evaluate((xCoord, yCoord) => {
       const elemento = document.elementFromPoint(xCoord, yCoord);
       if (!elemento) return false;
@@ -139,14 +139,12 @@ async function processarCliqueUnico(page, x, y) {
         screenY: yCoord
       };
 
-      // Dispara eventos de mouse em cascata
       elemento.dispatchEvent(new MouseEvent('mouseover', opts));
       elemento.dispatchEvent(new MouseEvent('mousedown', opts));
       elemento.focus({ preventScroll: true });
       elemento.dispatchEvent(new MouseEvent('mouseup', opts));
       elemento.dispatchEvent(new MouseEvent('click', opts));
 
-      // Disparadores extras de toque (Touch Events) para telas e elementos mobile
       if (typeof TouchEvent !== 'undefined') {
         try {
           const touch = new Touch({
@@ -165,7 +163,6 @@ async function processarCliqueUnico(page, x, y) {
         } catch (e) {}
       }
 
-      // Executa o clique nativo do elemento se disponível
       if (typeof elemento.click === 'function') {
         elemento.click();
       }
@@ -173,7 +170,6 @@ async function processarCliqueUnico(page, x, y) {
       return true;
     }, px, py);
 
-    // Fallback nativo caso o elementFromPoint retorne nulo
     if (!acaoExecutada) {
       await page.mouse.down();
       await page.mouse.up();
@@ -268,10 +264,23 @@ async function executar() {
   console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
   const chromiumPath = "/data/data/com.termux/files/usr/bin/chromium-browser";
+  
+  // Diretório na memória interna/compartilhada configurado pelo usuário
+  const userDataDir = "/data/data/com.termux/files/home/NAVEGADOR-NODE/assets/database";
+
+  // Garante que o diretório exista antes de iniciar o navegador
+  try {
+    if (!fs.existsSync(userDataDir)) {
+      fs.mkdirSync(userDataDir, { recursive: true });
+    }
+  } catch (e) {
+    console.log("⚠️ Aviso ao criar diretório de perfil:", e.message);
+  }
 
   const browser = await puppeteer.launch({
     headless: true,
     executablePath: chromiumPath,
+    userDataDir: userDataDir,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -281,7 +290,9 @@ async function executar() {
       "--disable-extensions",
       "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
       "--disable-web-security",
-      "--allow-running-insecure-content"
+      "--allow-running-insecure-content",
+      "--aggressive-cache-discard",
+      "--disk-cache-size=104857600"
     ]
   });
 
@@ -356,7 +367,7 @@ async function executar() {
       }
 
       if (!page.isClosed()) {
-        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 65 });
+        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 50 });
         const base64 = "data:image/jpeg;base64," + screenshotBuffer;
         await firebasePut(URL_P, base64);
       }
@@ -365,7 +376,7 @@ async function executar() {
       console.error("Erro no loop:", err.message);
     }
 
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 800));
   }
 }
 
