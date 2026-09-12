@@ -1,16 +1,17 @@
 /**
- * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
- * Otimizado: Salvando perfil, cache e dados na pasta compartilhada da memória interna.
+ * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (RENDER / DOCKER)
+ * Otimizado: Restauração/limpeza de memória descarregada, remoção de sessão ativa travada 
+ * e compatibilidade total com o ambiente Docker do Render.
  */
 
-const puppeteer = require("puppeteer-core");
+const puppeteer = require("puppeteer");
 const https = require("https");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
 
 // ===================================
-// FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
+// FUNÇÃO PARA OBTER O IP ATUAL DA INSTÂNCIA
 // ===================================
 function obterIpAtual() {
   return new Promise((resolve) => {
@@ -24,14 +25,14 @@ function obterIpAtual() {
             const ipFormatado = json.ip.replace(/\./g, "-");
             resolve(ipFormatado);
           } else {
-            resolve("instancia_fallback");
+            resolve("render_instancia");
           }
         } catch (e) {
-          resolve("instancia_fallback");
+          resolve("render_instancia");
         }
       });
     }).on("error", () => {
-      resolve("instancia_fallback");
+      resolve("render_instancia");
     });
   });
 }
@@ -249,7 +250,7 @@ async function injetarScriptDoFirebase(page) {
 // PRINCIPAL
 // ===================================
 async function executar() {
-  console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
+  console.log("🔍 Descobrindo o identificador atual da instância...");
   const ipAtual = await obterIpAtual();
   
   CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${ipAtual}`;
@@ -260,26 +261,30 @@ async function executar() {
   URL_P = `${CAMINHO_BASE}/P1.json`;
   URL_S = `${CAMINHO_BASE}/S1.json`;
 
-  console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
+  console.log(`🌐 Identificador Ativo: ${ipAtual}`);
   console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
-  const chromiumPath = "/data/data/com.termux/files/usr/bin/chromium-browser";
-  
-  // Diretório na memória interna/compartilhada configurado pelo usuário
-  const userDataDir = "/data/data/com.termux/files/home/NAVEGADOR-NODE/assets/database";
+  // Diretório de perfil otimizado para persistência limpa no container Docker
+  const userDataDir = path.join(__dirname, "assets", "database");
 
-  // Garante que o diretório exista antes de iniciar o navegador
+  // Restauração / Limpeza preventiva de sessão travada (evita erro de memória/lock anterior)
   try {
     if (!fs.existsSync(userDataDir)) {
       fs.mkdirSync(userDataDir, { recursive: true });
+    } else {
+      const lockFile = path.join(userDataDir, "SingletonLock");
+      if (fs.existsSync(lockFile)) {
+        fs.unlinkSync(lockFile);
+        console.log("🧹 Sessão ativa anterior detectada e derivada (SingletonLock removido).");
+      }
     }
   } catch (e) {
-    console.log("⚠️ Aviso ao criar diretório de perfil:", e.message);
+    console.log("⚠️ Aviso ao gerenciar diretório de perfil:", e.message);
   }
 
+  console.log("🚀 Iniciando Puppeteer...");
   const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: chromiumPath,
+    headless: "new",
     userDataDir: userDataDir,
     args: [
       "--no-sandbox",
@@ -292,7 +297,8 @@ async function executar() {
       "--disable-web-security",
       "--allow-running-insecure-content",
       "--aggressive-cache-discard",
-      "--disk-cache-size=104857600"
+      "--disk-cache-size=104857600",
+      "--no-zygote"
     ]
   });
 
