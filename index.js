@@ -1,7 +1,6 @@
 /**
- * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (RENDER / DOCKER)
- * Otimizado: Restauração/limpeza de memória descarregada, remoção de sessão ativa travada 
- * e compatibilidade total com o ambiente Docker do Render.
+ * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
+ * Otimizado: Salvando perfil, cache e dados na pasta local do projeto (assets/database).
  */
 
 const puppeteer = require("puppeteer");
@@ -11,7 +10,7 @@ const path = require("path");
 const fs = require("fs");
 
 // ===================================
-// FUNÇÃO PARA OBTER O IP ATUAL DA INSTÂNCIA
+// FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
 // ===================================
 function obterIpAtual() {
   return new Promise((resolve) => {
@@ -25,14 +24,14 @@ function obterIpAtual() {
             const ipFormatado = json.ip.replace(/\./g, "-");
             resolve(ipFormatado);
           } else {
-            resolve("render_instancia");
+            resolve("instancia_fallback");
           }
         } catch (e) {
-          resolve("render_instancia");
+          resolve("instancia_fallback");
         }
       });
     }).on("error", () => {
-      resolve("render_instancia");
+      resolve("instancia_fallback");
     });
   });
 }
@@ -250,7 +249,7 @@ async function injetarScriptDoFirebase(page) {
 // PRINCIPAL
 // ===================================
 async function executar() {
-  console.log("🔍 Descobrindo o identificador atual da instância...");
+  console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
   const ipAtual = await obterIpAtual();
   
   CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${ipAtual}`;
@@ -261,13 +260,13 @@ async function executar() {
   URL_P = `${CAMINHO_BASE}/P1.json`;
   URL_S = `${CAMINHO_BASE}/S1.json`;
 
-  console.log(`🌐 Identificador Ativo: ${ipAtual}`);
+  console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
   console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
-  // Diretório de perfil otimizado para persistência limpa no container Docker
+  // Diretório de perfil local dentro de assets/database na raiz do projeto
   const userDataDir = path.join(__dirname, "assets", "database");
 
-  // Restauração / Limpeza preventiva de sessão travada (evita erro de memória/lock anterior)
+  // Garante que o diretório exista e remove trava anterior (SingletonLock) se existir
   try {
     if (!fs.existsSync(userDataDir)) {
       fs.mkdirSync(userDataDir, { recursive: true });
@@ -275,14 +274,13 @@ async function executar() {
       const lockFile = path.join(userDataDir, "SingletonLock");
       if (fs.existsSync(lockFile)) {
         fs.unlinkSync(lockFile);
-        console.log("🧹 Sessão ativa anterior detectada e derivada (SingletonLock removido).");
+        console.log("🧹 Trava de sessão anterior (SingletonLock) removida com sucesso.");
       }
     }
   } catch (e) {
     console.log("⚠️ Aviso ao gerenciar diretório de perfil:", e.message);
   }
 
-  console.log("🚀 Iniciando Puppeteer...");
   const browser = await puppeteer.launch({
     headless: "new",
     userDataDir: userDataDir,
