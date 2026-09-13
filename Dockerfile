@@ -140,7 +140,7 @@ RUN cat > /etc/apache2/sites-available/000-default.conf <<'EOF'
 EOF
 
 # ============================================================
-# 6. COPIAR PROJETO
+# 6. COPIAR PROJETO (MOVIDO PARA ANTES DO NPM INSTALL)
 # ============================================================
 
 COPY . /var/www/html
@@ -195,7 +195,7 @@ RUN mkdir -p \
     /var/tmp/puppeteer
 
 # ============================================================
-# 10. DEPENDÊNCIAS DO PROJETO
+# 10. DEPENDÊNCIAS DO PROJETO (AGORA COM OS ARQUIVOS JÁ COPIADOS)
 # ============================================================
 
 RUN if [ -f package.json ]; then \
