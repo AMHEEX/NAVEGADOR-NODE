@@ -139,10 +139,13 @@ async function gerenciarIpNoIndexJson() {
 
     const ipPublicoAtual = await obterIpPublico();
 
+    const agora = Date.now();
     const novaInstancia = {
       id: ID_INSTANCIA,
       dataHoraInicio: DATA_HORA_INICIO,
-      dataHoraAtual: new Date().toISOString(),
+      dataHoraAtual: new Date(agora).toISOString(),
+      tempoAtual: agora,
+      expiraEm: agora + 30000,
       ipPublico: ipPublicoAtual
     };
 
@@ -253,6 +256,40 @@ function iniciarObservadorDeCliques(page) {
 }
 
 // ===================================
+// OBSERVADOR DE SCRIPT JS
+// ===================================
+function iniciarObservadorDeScript(page) {
+  setInterval(async () => {
+    if (!URL_SCRIPT || page.isClosed()) return;
+
+    try {
+      const codigo = await apiGet(URL_SCRIPT);
+
+      if (typeof codigo === "string" && codigo.trim() &&
+          codigo.trim() !== "null" && codigo.trim() !== "undefined") {
+
+        console.log("📜 JavaScript recebido da API. Executando...");
+
+        // Limpa primeiro para impedir execução duplicada.
+        await apiPut(URL_SCRIPT, "null");
+
+        await page.evaluate(async (codigoJS) => {
+          const resultado = (0, eval)(codigoJS);
+          if (resultado && typeof resultado.then === "function") {
+            await resultado;
+          }
+        }, codigo);
+
+        console.log("✅ JavaScript executado com sucesso.");
+      }
+    } catch (err) {
+      console.error("❌ Erro ao executar JavaScript:", err.message);
+      try { await apiPut(URL_SCRIPT, "null"); } catch {}
+    }
+  }, 500);
+}
+
+// ===================================
 // OBSERVADOR DE TEXTO PARA INSERÇÃO EM INPUTS
 // ===================================
 function iniciarObservadorDeTextoInput(page) {
@@ -303,6 +340,9 @@ async function executar() {
   URL_Y_ESCRITA = urlDownload(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
   URL_X_ESCRITA = urlDownload(`${BASE_API}/${ID_INSTANCIA}/X/index.txt`);
 
+  // JavaScript enviado pelo painel HTML para esta instância
+  URL_SCRIPT = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/SCRIPT/index.txt`);
+
   // Caminhos para leitura e escrita do texto de inputs
   URL_TEXT_INPUT_LEITURA = urlLeitura(`${BASE_API}/TEXT/INPUT/index.txt`);
   URL_TEXT_INPUT_ESCRITA = urlDownload(`${BASE_API}/TEXT/INPUT/index.txt`);
@@ -311,6 +351,7 @@ async function executar() {
     await apiPut(URL_Y_ESCRITA, "null");
     await apiPut(URL_X_ESCRITA, "null");
     await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
+    await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/SCRIPT/index.txt`), "null");
   } catch (e) {}
 
   await gerenciarIpNoIndexJson();
@@ -355,6 +396,7 @@ async function executar() {
 
   iniciarObservadorDeCliques(page);
   iniciarObservadorDeTextoInput(page);
+  iniciarObservadorDeScript(page);
 
   let contadorHeartbeat = 0;
 
@@ -375,8 +417,10 @@ async function executar() {
             await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
             ultimaURL = novaUrl;
             await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
+    await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/SCRIPT/index.txt`), "null");
           } catch (navErr) {
             await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
+    await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/SCRIPT/index.txt`), "null");
           }
         }
       }
