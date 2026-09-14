@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Atualizado com Envio em Formato Base64 para Screenshots
+ * Atualizado com Envio de Screenshot em Base64 para IMG/index.txt
  */
 
 const puppeteer = require("puppeteer");
@@ -36,7 +36,7 @@ const ID_INSTANCIA = "node_" + crypto.randomBytes(4).toString("hex");
 let BASE_API = "";
 let URL_IPS_INDEX = "";
 let URL_IPS_INDEX_ESCRITA = "";
-let URL_IMG_PNG = "";
+let URL_IMG_TXT = ""; // Alterado para salvar em .txt
 let URL_REDIRECT_TXT = "";
 let URL_Y_LEITURA = "";
 let URL_X_LEITURA = "";
@@ -242,7 +242,10 @@ async function executar() {
   BASE_API = `NAVEGADOR/NODE`;
   URL_IPS_INDEX = urlLeitura(`${BASE_API}/IPS/index.json`);
   URL_IPS_INDEX_ESCRITA = urlDownload(`${BASE_API}/IPS/index.json`);
-  URL_IMG_PNG = urlDownload(`${BASE_API}/${ID_INSTANCIA}/IMG/index.json`);
+  
+  // Alterado de index.json para index.txt para salvar o Base64 em texto puro
+  URL_IMG_TXT = urlDownload(`${BASE_API}/${ID_INSTANCIA}/IMG/index.txt`);
+  
   URL_REDIRECT_TXT = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`);
   
   URL_Y_LEITURA = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
@@ -330,13 +333,12 @@ async function executar() {
       const tempoDecorrido = Math.floor((Date.now() - tempoInicio) / 1000);
       await apiPut(URL_NAVEGADOR_TEMP, String(tempoDecorrido));
 
-      // Salva Screenshot atual convertido para Base64 (string) via POST
+      // Salva Screenshot atual convertido para Base64 (string) em IMG/index.txt via POST
       if (!page.isClosed()) {
         const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 50 });
         const screenshotBase64 = screenshotBuffer.toString("base64");
         
-        // Se precisar do prefixo data URI, use: `data:image/jpeg;base64,${screenshotBase64}`
-        await apiPut(URL_IMG_PNG, screenshotBase64);
+        await apiPut(URL_IMG_TXT, screenshotBase64);
       }
 
       // Atualiza o heartbeat a cada 10 segundos
