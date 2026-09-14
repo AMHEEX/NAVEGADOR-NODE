@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Atualizado com Controle de Timestamp e Sessão Segura
+ * Atualizado com Envio Binário Real (Buffer) para Screenshots
  */
 
 const puppeteer = require("puppeteer");
@@ -28,7 +28,6 @@ function urlDownload(caminhoRelativo) {
 // ===================================
 // GERADOR DE ID ÚNICO PARA A INSTÂNCIA
 // ===================================
-// Usamos um ID aleatório seguro para evitar conflito de IP compartilhado no Render
 const ID_INSTANCIA = "node_" + crypto.randomBytes(4).toString("hex");
 
 // ===================================
@@ -62,23 +61,37 @@ function apiGet(url) {
   });
 }
 
+// Função modificada para suportar tanto Texto/JSON quanto Buffers Binários sem corromper
 function apiPut(url, value) {
   return new Promise((resolve, reject) => {
-    const data = typeof value === "string" ? value : JSON.stringify(value);
+    let payload;
+    let contentType = "text/plain";
+
+    if (Buffer.isBuffer(value)) {
+      payload = value;
+      contentType = "application/octet-stream"; // Garante envio como binário puro
+    } else if (typeof value === "string") {
+      payload = value;
+    } else {
+      payload = JSON.stringify(value);
+      contentType = "application/json";
+    }
+
     const client = url.startsWith("https") ? https : http;
     const req = client.request(url, {
       method: "POST",
       headers: {
-        "Content-Type": "text/plain",
-        "Content-Length": Buffer.byteLength(data)
+        "Content-Type": contentType,
+        "Content-Length": Buffer.isBuffer(payload) ? payload.length : Buffer.byteLength(payload)
       }
     }, res => {
       let d = "";
       res.on("data", c => d += c);
       res.on("end", () => resolve(d));
     });
+
     req.on("error", reject);
-    req.write(data);
+    req.write(payload);
     req.end();
   });
 }
@@ -88,7 +101,6 @@ function apiPut(url, value) {
 // ===================================
 async function gerenciarIpNoIndexJson() {
   try {
-    console.log("📂 Sincronizando instâncias ativas no index.json...");
     let listaInstancias = [];
     
     try {
@@ -102,23 +114,19 @@ async function gerenciarIpNoIndexJson() {
       listaInstancias = [];
     }
 
-    // Remove instâncias antigas que expiraram (ex: mais de 30 segundos sem atualizar)
     const agora = Date.now();
     listaInstancias = listaInstancias.filter(item => {
       if (!item) return false;
-      // Compatibilidade com formato antigo (string) e novo (objeto com expiração)
       if (typeof item === "string") return true; 
       if (item.expiraEm && item.expiraEm > agora && item.id !== ID_INSTANCIA) return true;
       return false;
     });
 
-    // Adiciona ou atualiza a instância atual com validade de 25 segundos (renovada a cada loop)
     const novaInstancia = {
       id: ID_INSTANCIA,
       expiraEm: agora + 25000 
     };
 
-    // Remove duplicada se já existir
     listaInstancias = listaInstancias.filter(i => (typeof i === "string" ? i !== ID_INSTANCIA : i.id !== ID_INSTANCIA));
     listaInstancias.push(novaInstancia);
 
@@ -323,13 +331,13 @@ async function executar() {
       const tempoDecorrido = Math.floor((Date.now() - tempoInicio) / 1000);
       await apiPut(URL_NAVEGADOR_TEMP, String(tempoDecorrido));
 
-      // Salva Screenshot atual
+      // Salva Screenshot atual (Buffer binário puro via POST)
       if (!page.isClosed()) {
         const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 50 });
         await apiPut(URL_IMG_PNG, screenshotBuffer);
       }
 
-      // Atualiza o heartbeat a cada 10 segundos para manter a sessão viva no index.json
+      // Atualiza o heartbeat a cada 10 segundos
       contadorHeartbeat++;
       if (contadorHeartbeat >= 10) {
         contadorHeartbeat = 0;
