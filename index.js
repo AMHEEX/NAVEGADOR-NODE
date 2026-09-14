@@ -1,6 +1,6 @@
 /**
- * NAVEGADOR HEADLESS + API STORAGE AMHEEX (DOCKER / LINUX)
- * Otimizado: Envio de arquivo de imagem binário via POST (mais rápido, sem Base64) e listagem de IPs.
+ * NAVEGADOR HEADLESS + STORAGE API DINÂMICO (DOCKER / LINUX)
+ * Otimizado: Integração completa com a nova API de Storage.
  */
 
 const puppeteer = require("puppeteer");
@@ -10,12 +10,13 @@ const path = require("path");
 const fs = require("fs");
 
 // ===================================
-// CONFIGURAÇÃO DA API STORAGE
+// CONFIGURAÇÃO DA API DE STORAGE
 // ===================================
 const API_BASE = "https://api-storageamheex.onrender.com";
-let ipAtual = "";
-let CAMINHO_BASE_API = "";
-let URL_CLICK, URL_U, URL_T, URL_S, URL_TN, URL_IMG;
+
+let IP_ATUAL = "";
+let CAMINHO_BASE = "";
+let URL_CLICK, URL_U, URL_T, URL_IMG, URL_S, URL_REDIRECT, URL_Y, URL_X, URL_TEMP;
 
 // ===================================
 // FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
@@ -29,7 +30,8 @@ function obterIpAtual() {
         try {
           const json = JSON.parse(data);
           if (json && json.ip) {
-            resolve(json.ip.replace(/\./g, "-"));
+            const ipFormatado = json.ip.replace(/\./g, "-");
+            resolve(ipFormatado);
           } else {
             resolve("instancia_fallback");
           }
@@ -41,19 +43,6 @@ function obterIpAtual() {
       resolve("instancia_fallback");
     });
   });
-}
-
-// ===================================
-// GERADOR DE TEMPO FORMATADO (TN1.json)
-// ===================================
-function gerarTempoAtualFormatado() {
-  const agora = new Date();
-  const ano = agora.getFullYear();
-  const mes = String(agora.getMonth() + 1).padStart(2, '0');
-  const dia = String(agora.getDate()).padStart(2, '0');
-  const hora = String(agora.getHours()).padStart(2, '0');
-  const minuto = String(agora.getMinutes()).padStart(2, '0');
-  return `${ano}${mes}${dia}${hora}${minuto}`;
 }
 
 // ===================================
@@ -90,7 +79,7 @@ function corrigirUrl(urlSuja) {
 }
 
 // ===================================
-// API HELPERS (GET / PUT / POST BINARY)
+// STORAGE API HELPERS
 // ===================================
 function apiGet(url) {
   return new Promise((resolve, reject) => {
@@ -99,22 +88,27 @@ function apiGet(url) {
       let data = "";
       res.on("data", c => data += c);
       res.on("end", () => {
-        try { resolve(JSON.parse(data)); }
-        catch { resolve(null); }
+        try { 
+          if (res.headers['content-type'] && res.headers['content-type'].includes('application/json')) {
+            resolve(JSON.parse(data));
+          } else {
+            resolve(data);
+          }
+        }
+        catch { resolve(data || null); }
       });
     }).on("error", reject);
   });
 }
 
-function apiPut(caminhoRelativo, value) {
+function apiPut(url, value) {
   return new Promise((resolve, reject) => {
-    const data = JSON.stringify(value);
-    const url = `${API_BASE}/${caminhoRelativo}`;
+    const data = typeof value === "string" ? value : JSON.stringify(value);
     const client = url.startsWith("https") ? https : http;
     const req = client.request(url, {
       method: "PUT",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": typeof value === "string" ? "text/plain" : "application/json",
         "Content-Length": Buffer.byteLength(data)
       }
     }, res => {
@@ -128,67 +122,8 @@ function apiPut(caminhoRelativo, value) {
   });
 }
 
-// Envio otimizado de arquivo binário via POST (Multipart/form-data)
-function apiUploadArquivo(caminhoRelativo, bufferArquivo) {
-  return new Promise((resolve, reject) => {
-    const boundary = "----WebKitFormBoundary" + Math.random().toString(16).substring(2);
-    const url = `${API_BASE}/${caminhoRelativo}`;
-    const parsedUrl = new URL(url);
-
-    const header = Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="file"; filename="index.png"\r\n` +
-      `Content-Type: image/png\r\n\r\n`
-    );
-    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-    const totalLength = header.length + bufferArquivo.length + footer.length;
-
-    const options = {
-      hostname: parsedUrl.hostname,
-      path: parsedUrl.pathname,
-      method: "POST",
-      headers: {
-        "Content-Type": `multipart/form-data; boundary=${boundary}`,
-        "Content-Length": totalLength
-      }
-    };
-
-    const client = parsedUrl.protocol === "https:" ? https : http;
-    const req = client.request(options, (res) => {
-      let d = "";
-      res.on("data", c => d += c);
-      res.on("end", () => resolve(d));
-    });
-
-    req.on("error", reject);
-    req.write(header);
-    req.write(bufferArquivo);
-    req.write(footer);
-    req.end();
-  });
-}
-
 // ===================================
-// ATUALIZAR LISTA DE IPs NO SERVIDOR
-// ===================================
-async function atualizarListaIpsNoServidor(ipAtualStr) {
-  try {
-    let listaIps = await apiGet("AMHEEX/NAVEGADOR/IPS.json");
-    if (!Array.isArray(listaIps)) {
-      listaIps = [];
-    }
-    if (!listaIps.includes(ipAtualStr)) {
-      listaIps.push(ipAtualStr);
-      await apiPut("AMHEEX/NAVEGADOR/IPS.json", listaIps);
-      console.log(`📋 IP ${ipAtualStr} adicionado à lista global de IPs.`);
-    }
-  } catch (e) {
-    console.log("⚠️ Erro ao atualizar lista de IPs:", e.message);
-  }
-}
-
-// ===================================
-// CLIQUE UNIVERSAL PROFUNDO
+// MÉTODO INSTANTÂNEO DE CLIQUE UNIVERSAL
 // ===================================
 async function processarCliqueUnico(page, x, y) {
   const px = Math.max(0, Math.floor(x));
@@ -212,19 +147,20 @@ async function processarCliqueUnico(page, x, y) {
         buttons: 1
       };
 
-      const eventos = [
-        'pointerover', 'pointerenter', 'mouseover', 'mouseenter',
-        'mousemove', 'mousedown', 'pointerdown', 'focus', 'focusin',
-        'mouseup', 'pointerup', 'click', 'dblclick'
-      ];
-
-      eventos.forEach(tipoEvt => {
-        try { elemento.dispatchEvent(new MouseEvent(tipoEvt, opts)); } catch (err) {}
-      });
-
+      elemento.dispatchEvent(new MouseEvent('pointerover', opts));
+      elemento.dispatchEvent(new MouseEvent('pointerenter', opts));
+      elemento.dispatchEvent(new MouseEvent('mouseover', opts));
+      elemento.dispatchEvent(new MouseEvent('mouseenter', opts));
+      elemento.dispatchEvent(new MouseEvent('mousemove', opts));
+      elemento.dispatchEvent(new MouseEvent('mousedown', opts));
+      
       if (typeof elemento.focus === 'function') {
-        try { elemento.focus({ preventScroll: true }); } catch (e) {}
+        elemento.focus({ preventScroll: true });
       }
+
+      elemento.dispatchEvent(new MouseEvent('mouseup', opts));
+      elemento.dispatchEvent(new MouseEvent('click', opts));
+      elemento.dispatchEvent(new MouseEvent('pointerup', opts));
 
       if (typeof TouchEvent !== 'undefined') {
         try {
@@ -233,8 +169,8 @@ async function processarCliqueUnico(page, x, y) {
             target: elemento,
             clientX: xCoord,
             clientY: yCoord,
-            radiusX: 10,
-            radiusY: 10,
+            radiusX: 5,
+            radiusY: 5,
             rotationAngle: 0,
             force: 1
           });
@@ -245,28 +181,19 @@ async function processarCliqueUnico(page, x, y) {
       }
 
       if (typeof elemento.click === 'function') {
-        try { elemento.click(); } catch (e) {}
-      }
-
-      let pai = elemento.parentElement;
-      let contador = 0;
-      while (pai && contador < 3) {
-        if (pai.onclick || pai.tagName === 'A' || pai.tagName === 'BUTTON') {
-          try { pai.click(); } catch (e) {}
-          break;
-        }
-        pai = pai.parentElement;
-        contador++;
+        elemento.click();
       }
     }, px, py);
 
-    await page.mouse.down({ button: 'left' });
-    await page.mouse.up({ button: 'left' });
-  } catch (e) {}
+    console.log(`🖱 Clique instantâneo executado → X=${px} Y=${py}`);
+  } catch (e) {
+    console.log(`Erro no clique instantâneo X=${px} Y=${py}:`, e.message);
+  }
 }
 
 async function processarCliquesEmSequencia(page, listaCliques) {
   if (!Array.isArray(listaCliques) || listaCliques.length === 0) return;
+
   for (const item of listaCliques) {
     if (!item || typeof item.x !== "number" || typeof item.y !== "number") continue;
     await processarCliqueUnico(page, item.x, item.y);
@@ -274,10 +201,11 @@ async function processarCliquesEmSequencia(page, listaCliques) {
 }
 
 // ===================================
-// OBSERVADOR DE CLIQUES OTIMIZADO
+// OBSERVADOR DE CLIQUES EM TEMPO REAL
 // ===================================
 function iniciarObservadorDeCliques(page) {
   let processando = false;
+
   setInterval(async () => {
     if (processando || !URL_CLICK || page.isClosed()) return;
     processando = true;
@@ -292,22 +220,26 @@ function iniciarObservadorDeCliques(page) {
         }
       }
     } catch (err) {
+      // Ignora erros pontuais
     } finally {
       processando = false;
     }
-  }, 100);
+  }, 10);
 }
 
 // ===================================
-// INJEÇÃO DE SCRIPT (S1)
+// INJEÇÃO SEGURA DE SCRIPT (S1)
 // ===================================
-async function injetarScriptDoApi(page) {
+async function injetarScriptDoStorage(page) {
   try {
     const codigoScript = await apiGet(URL_S);
-    if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) return;
+    
+    if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) {
+      return;
+    }
 
     await page.evaluate((scriptContent) => {
-      const ID_SCRIPT_INJETADO = "__custom_api_script__";
+      const ID_SCRIPT_INJETADO = "__custom_storage_script__";
       let antigo = document.getElementById(ID_SCRIPT_INJETADO);
       if (antigo) antigo.remove();
 
@@ -315,8 +247,25 @@ async function injetarScriptDoApi(page) {
       s.id = ID_SCRIPT_INJETADO;
       s.textContent = scriptContent;
       (document.body || document.documentElement).appendChild(s);
+      console.log("✅ Script do S1 injetado com sucesso.");
     }, codigoScript);
-  } catch (e) {}
+
+  } catch (e) {
+    console.log("⚠️ Aviso ao injetar script do S1:", e.message);
+  }
+}
+
+// ===================================
+// GERADOR DE TEMPO FORMATADO
+// ===================================
+function gerarTempoAtualFormatado() {
+  const agora = new Date();
+  const ano = agora.getFullYear();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  const hora = String(agora.getHours()).padStart(2, '0');
+  const minuto = String(agora.getMinutes()).padStart(2, '0');
+  return `${ano}${mes}${dia}${hora}${minuto}`;
 }
 
 // ===================================
@@ -324,19 +273,23 @@ async function injetarScriptDoApi(page) {
 // ===================================
 async function executar() {
   console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
-  ipAtual = await obterIpAtual();
+  const ipAtual = await obterIpAtual();
+  IP_ATUAL = ipAtual;
   
-  CAMINHO_BASE_API = `AMHEEX/NAVEGADOR/${ipAtual}`;
+  CAMINHO_BASE = `AMHEEX/NAVEGADOR/${ipAtual}`;
 
-  URL_CLICK = `${CAMINHO_BASE_API}/CLICK.json`;
-  URL_U = `${CAMINHO_BASE_API}/U1.json`;
-  URL_T = `${CAMINHO_BASE_API}/T1.json`;
-  URL_S = `${CAMINHO_BASE_API}/S1.json`;
-  URL_TN = `${CAMINHO_BASE_API}/TN1.json`;
-  URL_IMG = `${CAMINHO_BASE_API}/IMG/index.png`;
+  URL_CLICK = `${API_BASE}/${CAMINHO_BASE}/CLICK.json`;
+  URL_U = `${API_BASE}/${CAMINHO_BASE}/U1.json`;
+  URL_T = `${API_BASE}/${CAMINHO_BASE}/T1.json`;
+  URL_IMG = `${API_BASE}/X/${CAMINHO_BASE}/IMG/index.png`;
+  URL_S = `${API_BASE}/${CAMINHO_BASE}/S1.json`;
+  URL_REDIRECT = `${API_BASE}/X/${CAMINHO_BASE}/URL/REDIRECT/index.txt`;
+  URL_Y = `${API_BASE}/${CAMINHO_BASE}/Y/index.txt`;
+  URL_X = `${API_BASE}/${CAMINHO_BASE}/X/index.txt`;
+  URL_TEMP = `${API_BASE}/${CAMINHO_BASE}/NAVEGADOR/TEMP/index.txt`;
 
   console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
-  await atualizarListaIpsNoServidor(ipAtual);
+  console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
   const userDataDir = path.join(__dirname, "assets", "database");
 
@@ -347,9 +300,12 @@ async function executar() {
       const lockFile = path.join(userDataDir, "SingletonLock");
       if (fs.existsSync(lockFile)) {
         fs.unlinkSync(lockFile);
+        console.log("🧹 Trava de sessão anterior (SingletonLock) removida com sucesso.");
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.log("⚠️ Aviso ao gerenciar diretório de perfil:", e.message);
+  }
 
   const browser = await puppeteer.launch({
     headless: "new",
@@ -358,18 +314,20 @@ async function executar() {
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-gpu",
-      "--disable-dev-shm-usage",
+      "--single-process",
       "--disable-extensions",
       "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
       "--disable-web-security",
       "--allow-running-insecure-content",
-      "--js-flags=--max-old-space-size=512",
+      "--js-flags=--max-old-space-size=4096",
+      "--enable-unsafe-swiftshader",
       "--no-zygote"
     ]
   });
 
   const page = await browser.newPage();
   
+  await page.setCacheEnabled(true);
   await page.setDefaultNavigationTimeout(0);
   await page.setDefaultTimeout(0);
   await page.setBypassCSP(true);
@@ -380,58 +338,107 @@ async function executar() {
       if (newPage && newPage !== page) {
         const targetUrl = newPage.url();
         if (targetUrl && targetUrl !== 'about:blank') {
+          console.log(`🔀 Redirecionando aba nova para a página principal: ${targetUrl}`);
           await newPage.close();
           await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 0 });
-          await apiPut(URL_U, targetUrl);
-          setTimeout(async () => { await apiPut(URL_U, ""); }, 1000);
         }
       }
     } catch (e) {}
   });
 
-  await page.setViewport({ width: 1280, height: 720 });
+  const larguraViewport = 1280;
+  const alturaViewport = 720;
+  await page.setViewport({ width: larguraViewport, height: alturaViewport });
 
   let ultimaURL = "https://google.com";
+
   console.log(`🌐 Abrindo página inicial: ${ultimaURL}`);
   
   try {
     await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 0 });
-  } catch (err) {}
+  } catch (err) {
+    console.log("⚠️ Falha ao abrir página inicial:", err.message);
+  }
 
-  await injetarScriptDoApi(page);
+  await injetarScriptDoStorage(page);
+  console.log("✅ Sessão ativa + Storage API conectada (Modo Ultra-Rápido ativado).");
+
   iniciarObservadorDeCliques(page);
 
-  // LOOP PRINCIPAL OTIMIZADO COM UPLOAD BINÁRIO E LISTAGEM DE IP
+  // LOOP PRINCIPAL EM TEMPO REAL
   while (true) {
     try {
       if (!page.isClosed()) {
-        const tempoLocal = gerarTempoAtualFormatado();
-        await apiPut(URL_TN, tempoLocal);
-
         const urlAtualNoBrowser = page.url();
         if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
           ultimaURL = urlAtualNoBrowser;
-          await apiPut(URL_U, urlAtualNoBrowser);
-          setTimeout(async () => { await apiPut(URL_U, ""); }, 800);
+          await apiPut(URL_U, ultimaURL);
         }
+
+        // SALVAR TEMPO DO NAVEGADOR
+        try {
+          const tempoAtualStr = gerarTempoAtualFormatado();
+          await apiPut(URL_TEMP, tempoAtualStr);
+        } catch (e) {}
+
+        // VERIFICAR REDIRECIONAMENTO VIA REDIRECT/index.txt
+        try {
+          const redirectUrlRaw = await apiGet(URL_REDIRECT);
+          if (redirectUrlRaw && typeof redirectUrlRaw === "string" && redirectUrlRaw.trim().length > 0 && redirectUrlRaw.trim().toLowerCase() !== "null") {
+            const novaUrlRedirect = corrigirUrl(redirectUrlRaw);
+            if (novaUrlRedirect.startsWith("http") && novaUrlRedirect !== ultimaURL) {
+              console.log(`🔀 Redirecionamento detectado para: ${novaUrlRedirect}`);
+              await page.goto(novaUrlRedirect, { waitUntil: "domcontentloaded", timeout: 0 });
+              ultimaURL = novaUrlRedirect;
+              await apiPut(URL_REDIRECT, "null");
+              await injetarScriptDoStorage(page);
+            }
+          }
+        } catch (e) {}
 
         const rawNovaUrl = await apiGet(URL_U);
         if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
           const novaUrl = corrigirUrl(rawNovaUrl);
+
           if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
+            console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
             try {
-              await apiPut(URL_U, "");
               await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 0 });
               ultimaURL = novaUrl;
-              await injetarScriptDoApi(page);
+              await apiPut(URL_U, "");
+              await injetarScriptDoStorage(page);
             } catch (navErr) {
+              console.error("❌ Erro de navegação:", navErr.message);
               await apiPut(URL_U, "");
             }
           }
         }
 
+        // VERIFICAR COORDENADAS X E Y PARA CLIQUE EXTERNO
+        try {
+          const coordXRaw = await apiGet(URL_X);
+          const coordYRaw = await apiGet(URL_Y);
+
+          if (coordXRaw !== null && coordYRaw !== null && String(coordXRaw).trim().toLowerCase() !== "null" && String(coordYRaw).trim().toLowerCase() !== "null") {
+            const xVal = parseFloat(coordXRaw);
+            const yVal = parseFloat(coordYRaw);
+
+            if (!isNaN(xVal) && !isNaN(yVal)) {
+              console.log(`📍 Coordenadas recebidas para clique -> X=${xVal}, Y=${yVal}`);
+              await processarCliqueUnico(page, xVal, yVal);
+              
+              // Limpar coordenadas salvando "null"
+              await apiPut(URL_X, "null");
+              await apiPut(URL_Y, "null");
+            }
+          }
+        } catch (e) {}
+
+        // LEITURA E LOG DETALHADO DO TEXTO (URL_T) NO SERVIDOR
         const texto = await apiGet(URL_T);
         if (typeof texto === "string" && texto.trim().length > 0) {
+          console.log(`📥 Texto input identificado no servidor: "${texto}"`);
+
           await page.evaluate((textoInserir) => {
             const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input[type="email"], input[type="password"], textarea, [contenteditable="true"]');
             if (inputs.length > 0) {
@@ -445,21 +452,51 @@ async function executar() {
                 el.dispatchEvent(new Event('input', { bubbles: true }));
                 el.dispatchEvent(new Event('change', { bubbles: true }));
               });
+            } else {
+              const active = document.activeElement;
+              if (active) {
+                active.value = textoInserir;
+                active.dispatchEvent(new Event('input', { bubbles: true }));
+              }
             }
           }, texto);
+
+          console.log("⌨ Texto colado/substituído em todos os inputs da página com sucesso.");
           await apiPut(URL_T, "");
         }
 
-        // Envio do print binário direto para a API Storage (sem conversão pesada para Base64)
-        const screenshotBuffer = await page.screenshot({ encoding: "binary", type: "jpeg", quality: 60 });
-        await apiUploadArquivo(URL_IMG, screenshotBuffer);
+        // ENVIO DO PRINT DA PÁGINA EM BINÁRIO PARA ${API}/${IP_ATUAL}/IMG/index.png
+        const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 75 });
+        const imgSaveUrl = `${API_BASE}/${CAMINHO_BASE}/IMG/index.png`;
+        
+        await new Promise((resolve) => {
+          const client = imgSaveUrl.startsWith("https") ? https : http;
+          const req = client.request(imgSaveUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "image/jpeg",
+              "Content-Length": screenshotBuffer.length
+            }
+          }, res => {
+            res.on("data", () => {});
+            res.on("end", resolve);
+          });
+          req.on("error", () => resolve());
+          req.write(screenshotBuffer);
+          req.end();
+        });
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error("Erro no loop principal:", err.message);
+    }
 
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r => setTimeout(r, 10));
   }
 }
 
+// ===================================
+// INICIAR
+// ===================================
 executar().catch(err => {
   console.error("❌ Erro fatal:", err.message);
 });
