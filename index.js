@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Atualizado para a Nova API Storage: https://api-storageamheex.onrender.com
+ * Atualizado com Controle de Timestamp e Sessão Segura
  */
 
 const puppeteer = require("puppeteer");
@@ -8,6 +8,7 @@ const https = require("https");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 // ===================================
 // CONFIGURAÇÃO DA API STORAGE
@@ -25,36 +26,14 @@ function urlDownload(caminhoRelativo) {
 }
 
 // ===================================
-// FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
+// GERADOR DE ID ÚNICO PARA A INSTÂNCIA
 // ===================================
-function obterIpAtual() {
-  return new Promise((resolve) => {
-    https.get("https://api.ipify.org?format=json", (res) => {
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(data);
-          if (json && json.ip) {
-            const ipFormatado = json.ip.replace(/\./g, "-");
-            resolve(ipFormatado);
-          } else {
-            resolve("instancia_fallback");
-          }
-        } catch (e) {
-          resolve("instancia_fallback");
-        }
-      });
-    }).on("error", () => {
-      resolve("instancia_fallback");
-    });
-  });
-}
+// Usamos um ID aleatório seguro para evitar conflito de IP compartilhado no Render
+const ID_INSTANCIA = "node_" + crypto.randomBytes(4).toString("hex");
 
 // ===================================
 // VARIÁVEIS DE CAMINHO DA API
 // ===================================
-let IP_ATUAL = "";
 let BASE_API = "";
 let URL_IPS_INDEX = "";
 let URL_IPS_INDEX_ESCRITA = "";
@@ -88,7 +67,7 @@ function apiPut(url, value) {
     const data = typeof value === "string" ? value : JSON.stringify(value);
     const client = url.startsWith("https") ? https : http;
     const req = client.request(url, {
-      method: "POST", // A API usa POST/chunks para gravar
+      method: "POST",
       headers: {
         "Content-Type": "text/plain",
         "Content-Length": Buffer.byteLength(data)
@@ -105,37 +84,47 @@ function apiPut(url, value) {
 }
 
 // ===================================
-// GERENCIAMENTO ROBUSTO DE JSON/IPS E CREDENCIAIS NULAS
+// GERENCIAMENTO ROBUSTO DE INSTÂNCIAS COM TIMESTAMP
 // ===================================
 async function gerenciarIpNoIndexJson() {
   try {
-    console.log("📂 Verificando e atualizando o arquivo index.json de IPs...");
-    let dadosJson = [];
+    console.log("📂 Sincronizando instâncias ativas no index.json...");
+    let listaInstancias = [];
     
     try {
       const conteudoAtual = await apiGet(URL_IPS_INDEX);
       if (Array.isArray(conteudoAtual)) {
-        // Remove valores nulos, vazios ou inválidos antes de iniciar
-        dadosJson = conteudoAtual.filter(ip => ip && ip !== "null" && ip !== "undefined" && typeof ip === "string");
+        listaInstancias = conteudoAtual;
       } else if (typeof conteudoAtual === "object" && conteudoAtual !== null) {
-        dadosJson = Object.values(conteudoAtual).filter(ip => ip && ip !== "null" && ip !== "undefined" && typeof ip === "string");
+        listaInstancias = Object.values(conteudoAtual);
       }
     } catch (e) {
-      console.log("⚠️ Arquivo index.json não encontrado ou inválido. Criando novo JSON...");
-      dadosJson = [];
+      listaInstancias = [];
     }
 
-    // Adiciona o IP atual se ele não estiver na lista
-    if (IP_ATUAL && !dadosJson.includes(IP_ATUAL)) {
-      dadosJson.push(IP_ATUAL);
-      console.log(`➕ IP atual (${IP_ATUAL}) adicionado à lista.`);
-    }
+    // Remove instâncias antigas que expiraram (ex: mais de 30 segundos sem atualizar)
+    const agora = Date.now();
+    listaInstancias = listaInstancias.filter(item => {
+      if (!item) return false;
+      // Compatibilidade com formato antigo (string) e novo (objeto com expiração)
+      if (typeof item === "string") return true; 
+      if (item.expiraEm && item.expiraEm > agora && item.id !== ID_INSTANCIA) return true;
+      return false;
+    });
 
-    // Salva a lista limpa e atualizada
-    await apiPut(URL_IPS_INDEX_ESCRITA, JSON.stringify(dadosJson, null, 2));
-    console.log("✅ index.json sincronizado com sucesso.");
+    // Adiciona ou atualiza a instância atual com validade de 25 segundos (renovada a cada loop)
+    const novaInstancia = {
+      id: ID_INSTANCIA,
+      expiraEm: agora + 25000 
+    };
+
+    // Remove duplicada se já existir
+    listaInstancias = listaInstancias.filter(i => (typeof i === "string" ? i !== ID_INSTANCIA : i.id !== ID_INSTANCIA));
+    listaInstancias.push(novaInstancia);
+
+    await apiPut(URL_IPS_INDEX_ESCRITA, JSON.stringify(listaInstancias, null, 2));
   } catch (err) {
-    console.error("❌ Erro ao gerenciar index.json:", err.message);
+    console.error("❌ Erro ao atualizar index.json:", err.message);
   }
 }
 
@@ -228,15 +217,12 @@ function iniciarObservadorDeCliques(page) {
       const x = parseFloat(strX);
 
       if (!isNaN(y) && !isNaN(x)) {
-        // Zera as coordenadas na API salvando "null" para evitar loop de cliques
         await apiPut(URL_Y_ESCRITA, "null");
         await apiPut(URL_X_ESCRITA, "null");
 
         await processarCliqueUnico(page, x, y);
       }
-    } catch (err) {
-      // Ignora erros pontuais de leitura
-    }
+    } catch (err) {}
   }, 500);
 }
 
@@ -244,32 +230,27 @@ function iniciarObservadorDeCliques(page) {
 // PRINCIPAL
 // ===================================
 async function executar() {
-  console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
-  IP_ATUAL = await obterIpAtual();
+  console.log(`🆔 ID da Instância Gerado: ${ID_INSTANCIA}`);
   
   BASE_API = `NAVEGADOR/NODE`;
   URL_IPS_INDEX = urlLeitura(`${BASE_API}/IPS/index.json`);
   URL_IPS_INDEX_ESCRITA = urlDownload(`${BASE_API}/IPS/index.json`);
-  URL_IMG_PNG = urlDownload(`${BASE_API}/${IP_ATUAL}/IMG/index.png`);
-  URL_REDIRECT_TXT = urlLeitura(`${BASE_API}/${IP_ATUAL}/URL/REDIRECT/index.txt`);
+  URL_IMG_PNG = urlDownload(`${BASE_API}/${ID_INSTANCIA}/IMG/index.png`);
+  URL_REDIRECT_TXT = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`);
   
-  URL_Y_LEITURA = urlLeitura(`${BASE_API}/${IP_ATUAL}/Y/index.txt`);
-  URL_X_LEITURA = urlLeitura(`${BASE_API}/${IP_ATUAL}/X/index.txt`);
-  URL_Y_ESCRITA = urlDownload(`${BASE_API}/${IP_ATUAL}/Y/index.txt`);
-  URL_X_ESCRITA = urlDownload(`${BASE_API}/${IP_ATUAL}/X/index.txt`);
-  URL_NAVEGADOR_TEMP = urlDownload(`${BASE_API}/${IP_ATUAL}/NAVEGADOR/TEMP/index.txt`);
+  URL_Y_LEITURA = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
+  URL_X_LEITURA = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/X/index.txt`);
+  URL_Y_ESCRITA = urlDownload(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
+  URL_X_ESCRITA = urlDownload(`${BASE_API}/${ID_INSTANCIA}/X/index.txt`);
+  URL_NAVEGADOR_TEMP = urlDownload(`${BASE_API}/${ID_INSTANCIA}/NAVEGADOR/TEMP/index.txt`);
 
-  console.log(`🌐 IP Atual Identificado: ${IP_ATUAL}`);
-
-  // Limpa credenciais/registros antigos salvos como "null" ou limpa dados do servidor para este IP antes de iniciar
   try {
     await apiPut(URL_Y_ESCRITA, "null");
     await apiPut(URL_X_ESCRITA, "null");
-    await apiPut(urlDownload(`${BASE_API}/${IP_ATUAL}/URL/REDIRECT/index.txt`), "null");
+    await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
     await apiPut(URL_NAVEGADOR_TEMP, "0");
   } catch (e) {}
 
-  // Gerencia o index.json (Cria se não existir, filtra "null" e adiciona o IP atual)
   await gerenciarIpNoIndexJson();
 
   const userDataDir = path.join(__dirname, "assets", "database");
@@ -313,6 +294,7 @@ async function executar() {
   iniciarObservadorDeCliques(page);
 
   let tempoInicio = Date.now();
+  let contadorHeartbeat = 0;
 
   while (true) {
     try {
@@ -330,10 +312,9 @@ async function executar() {
           try {
             await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
             ultimaURL = novaUrl;
-            // Apaga o redirecionamento colocando null
-            await apiPut(urlDownload(`${BASE_API}/${IP_ATUAL}/URL/REDIRECT/index.txt`), "null");
+            await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
           } catch (navErr) {
-            await apiPut(urlDownload(`${BASE_API}/${IP_ATUAL}/URL/REDIRECT/index.txt`), "null");
+            await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
           }
         }
       }
@@ -342,10 +323,17 @@ async function executar() {
       const tempoDecorrido = Math.floor((Date.now() - tempoInicio) / 1000);
       await apiPut(URL_NAVEGADOR_TEMP, String(tempoDecorrido));
 
-      // Salva Screenshot/Imagem atual
+      // Salva Screenshot atual
       if (!page.isClosed()) {
         const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 50 });
         await apiPut(URL_IMG_PNG, screenshotBuffer);
+      }
+
+      // Atualiza o heartbeat a cada 10 segundos para manter a sessão viva no index.json
+      contadorHeartbeat++;
+      if (contadorHeartbeat >= 10) {
+        contadorHeartbeat = 0;
+        await gerenciarIpNoIndexJson();
       }
 
     } catch (err) {
