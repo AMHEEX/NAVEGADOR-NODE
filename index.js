@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Atualizado com Envio Binário Real (Buffer) para Screenshots
+ * Atualizado com Envio em Formato Base64 para Screenshots
  */
 
 const puppeteer = require("puppeteer");
@@ -61,7 +61,6 @@ function apiGet(url) {
   });
 }
 
-// Função modificada para suportar tanto Texto/JSON quanto Buffers Binários sem corromper
 function apiPut(url, value) {
   return new Promise((resolve, reject) => {
     let payload;
@@ -69,7 +68,7 @@ function apiPut(url, value) {
 
     if (Buffer.isBuffer(value)) {
       payload = value;
-      contentType = "application/octet-stream"; // Garante envio como binário puro
+      contentType = "application/octet-stream";
     } else if (typeof value === "string") {
       payload = value;
     } else {
@@ -331,10 +330,13 @@ async function executar() {
       const tempoDecorrido = Math.floor((Date.now() - tempoInicio) / 1000);
       await apiPut(URL_NAVEGADOR_TEMP, String(tempoDecorrido));
 
-      // Salva Screenshot atual (Buffer binário puro via POST)
+      // Salva Screenshot atual convertido para Base64 (string) via POST
       if (!page.isClosed()) {
         const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 50 });
-        await apiPut(URL_IMG_PNG, screenshotBuffer);
+        const screenshotBase64 = screenshotBuffer.toString("base64");
+        
+        // Se precisar do prefixo data URI, use: `data:image/jpeg;base64,${screenshotBase64}`
+        await apiPut(URL_IMG_PNG, screenshotBase64);
       }
 
       // Atualiza o heartbeat a cada 10 segundos
