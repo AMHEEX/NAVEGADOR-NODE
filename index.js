@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Otimizado: Tempo real extremo (10ms), cliques universais e logs detalhados de texto.
+ * Otimizado: Tempo real extremo (10ms), cliques universais universais profundos e TN1.json ativo.
  */
 
 const puppeteer = require("puppeteer");
@@ -42,7 +42,20 @@ function obterIpAtual() {
 const BASE_SERVIDOR = "https://amheex-default-rtdb.firebaseio.com";
 
 let CAMINHO_BASE = "";
-let URL_CLICK, URL_U, URL_T, URL_P, URL_S;
+let URL_CLICK, URL_U, URL_T, URL_P, URL_S, URL_TN;
+
+// ===================================
+// GERADOR DE TEMPO FORMATADO (IGUAL HTML)
+// ===================================
+function gerarTempoAtualFormatado() {
+  const agora = new Date();
+  const ano = agora.getFullYear();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  const hora = String(agora.getHours()).padStart(2, '0');
+  const minuto = String(agora.getMinutes()).padStart(2, '0');
+  return `${ano}${mes}${dia}${hora}${minuto}`;
+}
 
 // ===================================
 // CORRETOR INTELIGENTE DE URL
@@ -116,16 +129,18 @@ function firebasePut(url, value) {
 }
 
 // ===================================
-// MÉTODO INSTANTÂNEO DE CLIQUE UNIVERSAL
+// MÉTODO INSTANTÂNEO DE CLIQUE UNIVERSAL PROFUNDO
 // ===================================
 async function processarCliqueUnico(page, x, y) {
   const px = Math.max(0, Math.floor(x));
   const py = Math.max(0, Math.floor(y));
 
   try {
+    // Move o cursor nativo do Puppeteer para a posição exata
     await page.mouse.move(px, py);
 
     await page.evaluate((xCoord, yCoord) => {
+      // Varre o elemento exato e também verifica o elemento superior por cima de tudo (pointer-events / overlays)
       const elemento = document.elementFromPoint(xCoord, yCoord);
       if (!elemento) return;
 
@@ -140,22 +155,24 @@ async function processarCliqueUnico(page, x, y) {
         buttons: 1
       };
 
-      // Dispara sequência completa para forçar qualquer elemento da página a interagir
-      elemento.dispatchEvent(new MouseEvent('pointerover', opts));
-      elemento.dispatchEvent(new MouseEvent('pointerenter', opts));
-      elemento.dispatchEvent(new MouseEvent('mouseover', opts));
-      elemento.dispatchEvent(new MouseEvent('mouseenter', opts));
-      elemento.dispatchEvent(new MouseEvent('mousemove', opts));
-      elemento.dispatchEvent(new MouseEvent('mousedown', opts));
-      
+      // Dispara sequência completa simulando o comportamento exato de um mouse humano real e toque móvel
+      const eventos = [
+        'pointerover', 'pointerenter', 'mouseover', 'mouseenter',
+        'mousemove', 'mousedown', 'pointerdown', 'focus', 'focusin',
+        'mouseup', 'pointerup', 'click', 'dblclick'
+      ];
+
+      eventos.forEach(tipoEvt => {
+        try {
+          elemento.dispatchEvent(new MouseEvent(tipoEvt, opts));
+        } catch (err) {}
+      });
+
       if (typeof elemento.focus === 'function') {
-        elemento.focus({ preventScroll: true });
+        try { elemento.focus({ preventScroll: true }); } catch (e) {}
       }
 
-      elemento.dispatchEvent(new MouseEvent('mouseup', opts));
-      elemento.dispatchEvent(new MouseEvent('click', opts));
-      elemento.dispatchEvent(new MouseEvent('pointerup', opts));
-
+      // Suporte a TouchEvents caso o site exija toques de tela
       if (typeof TouchEvent !== 'undefined') {
         try {
           const touch = new Touch({
@@ -163,8 +180,8 @@ async function processarCliqueUnico(page, x, y) {
             target: elemento,
             clientX: xCoord,
             clientY: yCoord,
-            radiusX: 5,
-            radiusY: 5,
+            radiusX: 10,
+            radiusY: 10,
             rotationAngle: 0,
             force: 1
           });
@@ -174,14 +191,31 @@ async function processarCliqueUnico(page, x, y) {
         } catch (e) {}
       }
 
+      // Força o método nativo de click caso o elemento possua manipuladores diretos
       if (typeof elemento.click === 'function') {
-        elemento.click();
+        try { elemento.click(); } catch (e) {}
+      }
+
+      // Se o elemento estiver dentro de um link ou container clicável pai, aciona também
+      let pai = elemento.parentElement;
+      let contador = 0;
+      while (pai && contador < 3) {
+        if (pai.onclick || pai.tagName === 'A' || pai.tagName === 'BUTTON') {
+          try { pai.click(); } catch (e) {}
+          break;
+        }
+        pai = pai.parentElement;
+        contador++;
       }
     }, px, py);
 
-    console.log(`🖱 Clique instantâneo executado em qualquer elemento → X=${px} Y=${py}`);
+    // Executa também o clique direto do driver do Puppeteer para garantir comportamento nativo do navegador
+    await page.mouse.down({ button: 'left' });
+    await page.mouse.up({ button: 'left' });
+
+    console.log(`🖱 Clique universal profundo executado com sucesso em → X=${px} Y=${py}`);
   } catch (e) {
-    console.log(`Erro no clique instantâneo X=${px} Y=${py}:`, e.message);
+    console.log(`Erro no clique universal X=${px} Y=${py}:`, e.message);
   }
 }
 
@@ -263,6 +297,7 @@ async function executar() {
   URL_T = `${CAMINHO_BASE}/T1.json`;
   URL_P = `${CAMINHO_BASE}/P1.json`;
   URL_S = `${CAMINHO_BASE}/S1.json`;
+  URL_TN = `${CAMINHO_BASE}/TN1.json`;
 
   console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
   console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
@@ -308,15 +343,21 @@ async function executar() {
   await page.setDefaultTimeout(0);
   await page.setBypassCSP(true);
   
+  // Tratamento otimizado de novas abas/popups de redirecionamento para capturar a URL e fechar a aba fantasma
   page.on('targetcreated', async (target) => {
     try {
       const newPage = await target.page();
       if (newPage && newPage !== page) {
         const targetUrl = newPage.url();
         if (targetUrl && targetUrl !== 'about:blank') {
-          console.log(`🔀 Redirecionando aba nova para a página principal: ${targetUrl}`);
+          console.log(`🔀 Redirecionamento/Nova aba identificado: ${targetUrl}`);
           await newPage.close();
           await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 0 });
+          // Atualiza a URL no servidor e apaga imediatamente para evitar loop infinito de redirecionamento
+          await firebasePut(URL_U, targetUrl);
+          setTimeout(async () => {
+            await firebasePut(URL_U, "");
+          }, 1000);
         }
       }
     } catch (e) {}
@@ -345,10 +386,18 @@ async function executar() {
   while (true) {
     try {
       if (!page.isClosed()) {
+        // Atualiza a chave de tempo TN1.json continuamente no servidor (mesma lógica do O1 / HTML)
+        const tempoLocal = gerarTempoAtualFormatado();
+        await firebasePut(URL_TN, tempoLocal);
+
         const urlAtualNoBrowser = page.url();
         if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
           ultimaURL = urlAtualNoBrowser;
-          await firebasePut(URL_U, ultimaURL);
+          await firebasePut(URL_U, urlAtualNoBrowser);
+          // Limpa a URL do servidor após pequeno delay para evitar que fique re-enviando e redirecionando em looping
+          setTimeout(async () => {
+            await firebasePut(URL_U, "");
+          }, 800);
         }
 
         const rawNovaUrl = await firebaseGet(URL_U);
@@ -356,11 +405,12 @@ async function executar() {
           const novaUrl = corrigirUrl(rawNovaUrl);
 
           if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
-            console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
+            console.log(`🔀 Mudando para URL solicitada: ${novaUrl}`);
             try {
+              // Apaga imediatamente do servidor para evitar loop de re-navegação constante
+              await firebasePut(URL_U, "");
               await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 0 });
               ultimaURL = novaUrl;
-              await firebasePut(URL_U, "");
               await injetarScriptDoFirebase(page);
             } catch (navErr) {
               console.error("❌ Erro de navegação:", navErr.message);
