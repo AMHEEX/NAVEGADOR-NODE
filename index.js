@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + STORAGE API DINÂMICO (DOCKER / LINUX)
- * Otimizado: Integração completa com a nova API de Storage.
+ * Otimizado: Integração completa com a API de Storage (/X/) e limpeza inicial das chaves.
  */
 
 const puppeteer = require("puppeteer");
@@ -79,7 +79,7 @@ function corrigirUrl(urlSuja) {
 }
 
 // ===================================
-// STORAGE API HELPERS
+// STORAGE API HELPERS (COM SUPORTE A /X/)
 // ===================================
 function apiGet(url) {
   return new Promise((resolve, reject) => {
@@ -215,7 +215,7 @@ function iniciarObservadorDeCliques(page) {
       if (dadosClick) {
         const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
         if (listaCliques.length > 0) {
-          await apiPut(URL_CLICK, null);
+          await apiPut(URL_CLICK, "null");
           await processarCliquesEmSequencia(page, listaCliques);
         }
       }
@@ -234,7 +234,7 @@ async function injetarScriptDoStorage(page) {
   try {
     const codigoScript = await apiGet(URL_S);
     
-    if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) {
+    if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0 || codigoScript.trim().toLowerCase() === "null") {
       return;
     }
 
@@ -278,18 +278,37 @@ async function executar() {
   
   CAMINHO_BASE = `AMHEEX/NAVEGADOR/${ipAtual}`;
 
-  URL_CLICK = `${API_BASE}/${CAMINHO_BASE}/CLICK.json`;
-  URL_U = `${API_BASE}/${CAMINHO_BASE}/U1.json`;
-  URL_T = `${API_BASE}/${CAMINHO_BASE}/T1.json`;
+  // URLs configuradas com o prefixo /X/ conforme a arquitetura da API de Storage
+  URL_CLICK = `${API_BASE}/X/${CAMINHO_BASE}/CLICK.json`;
+  URL_U = `${API_BASE}/X/${CAMINHO_BASE}/U1.json`;
+  URL_T = `${API_BASE}/X/${CAMINHO_BASE}/T1.json`;
   URL_IMG = `${API_BASE}/X/${CAMINHO_BASE}/IMG/index.png`;
-  URL_S = `${API_BASE}/${CAMINHO_BASE}/S1.json`;
+  URL_S = `${API_BASE}/X/${CAMINHO_BASE}/S1.json`;
   URL_REDIRECT = `${API_BASE}/X/${CAMINHO_BASE}/URL/REDIRECT/index.txt`;
-  URL_Y = `${API_BASE}/${CAMINHO_BASE}/Y/index.txt`;
-  URL_X = `${API_BASE}/${CAMINHO_BASE}/X/index.txt`;
-  URL_TEMP = `${API_BASE}/${CAMINHO_BASE}/NAVEGADOR/TEMP/index.txt`;
+  URL_Y = `${API_BASE}/X/${CAMINHO_BASE}/Y/index.txt`;
+  URL_X = `${API_BASE}/X/${CAMINHO_BASE}/X/index.txt`;
+  URL_TEMP = `${API_BASE}/X/${CAMINHO_BASE}/NAVEGADOR/TEMP/index.txt`;
 
   console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
   console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
+
+  // Limpeza inicial: define todas as chaves principais como "null" ao iniciar o script
+  console.log("🧹 Inicializando e limpando chaves no servidor (definindo como null)...");
+  try {
+    await Promise.all([
+      apiPut(URL_CLICK, "null"),
+      apiPut(URL_U, "null"),
+      apiPut(URL_T, "null"),
+      apiPut(URL_S, "null"),
+      apiPut(URL_REDIRECT, "null"),
+      apiPut(URL_X, "null"),
+      apiPut(URL_Y, "null"),
+      apiPut(URL_TEMP, "null")
+    ]);
+    console.log("✅ Chaves limpas com sucesso no servidor.");
+  } catch (err) {
+    console.log("⚠️ Aviso ao limpar chaves iniciais:", err.message);
+  }
 
   const userDataDir = path.join(__dirname, "assets", "database");
 
@@ -356,6 +375,7 @@ async function executar() {
   
   try {
     await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 0 });
+    await apiPut(URL_U, ultimaURL);
   } catch (err) {
     console.log("⚠️ Falha ao abrir página inicial:", err.message);
   }
@@ -372,13 +392,19 @@ async function executar() {
         const urlAtualNoBrowser = page.url();
         if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
           ultimaURL = urlAtualNoBrowser;
-          await apiPut(URL_U, ultimaURL);
+          const conteudoAtualU1 = await apiGet(URL_U);
+          if (conteudoAtualU1 !== ultimaURL) {
+            await apiPut(URL_U, ultimaURL);
+          }
         }
 
         // SALVAR TEMPO DO NAVEGADOR
         try {
           const tempoAtualStr = gerarTempoAtualFormatado();
-          await apiPut(URL_TEMP, tempoAtualStr);
+          const conteudoAtualTemp = await apiGet(URL_TEMP);
+          if (conteudoAtualTemp !== tempoAtualStr) {
+            await apiPut(URL_TEMP, tempoAtualStr);
+          }
         } catch (e) {}
 
         // VERIFICAR REDIRECIONAMENTO VIA REDIRECT/index.txt
@@ -397,7 +423,7 @@ async function executar() {
         } catch (e) {}
 
         const rawNovaUrl = await apiGet(URL_U);
-        if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
+        if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0 && rawNovaUrl.trim().toLowerCase() !== "null") {
           const novaUrl = corrigirUrl(rawNovaUrl);
 
           if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
@@ -409,7 +435,7 @@ async function executar() {
               await injetarScriptDoStorage(page);
             } catch (navErr) {
               console.error("❌ Erro de navegação:", navErr.message);
-              await apiPut(URL_U, "");
+              await apiPut(URL_U, "null");
             }
           }
         }
@@ -436,7 +462,7 @@ async function executar() {
 
         // LEITURA E LOG DETALHADO DO TEXTO (URL_T) NO SERVIDOR
         const texto = await apiGet(URL_T);
-        if (typeof texto === "string" && texto.trim().length > 0) {
+        if (typeof texto === "string" && texto.trim().length > 0 && texto.trim().toLowerCase() !== "null") {
           console.log(`📥 Texto input identificado no servidor: "${texto}"`);
 
           await page.evaluate((textoInserir) => {
@@ -462,12 +488,12 @@ async function executar() {
           }, texto);
 
           console.log("⌨ Texto colado/substituído em todos os inputs da página com sucesso.");
-          await apiPut(URL_T, "");
+          await apiPut(URL_T, "null");
         }
 
-        // ENVIO DO PRINT DA PÁGINA EM BINÁRIO PARA ${API}/${IP_ATUAL}/IMG/index.png
+        // ENVIO DO PRINT DA PÁGINA EM BINÁRIO PARA O STORAGE
         const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 75 });
-        const imgSaveUrl = `${API_BASE}/${CAMINHO_BASE}/IMG/index.png`;
+        const imgSaveUrl = URL_IMG;
         
         await new Promise((resolve) => {
           const client = imgSaveUrl.startsWith("https") ? https : http;
