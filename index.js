@@ -57,6 +57,7 @@ function obterIpAtual() {
 let IP_ATUAL = "";
 let BASE_API = "";
 let URL_IPS_INDEX = "";
+let URL_IPS_INDEX_ESCRITA = "";
 let URL_IMG_PNG = "";
 let URL_REDIRECT_TXT = "";
 let URL_Y_LEITURA = "";
@@ -64,39 +65,6 @@ let URL_X_LEITURA = "";
 let URL_Y_ESCRITA = "";
 let URL_X_ESCRITA = "";
 let URL_NAVEGADOR_TEMP = "";
-
-// ===================================
-// CORRETOR INTELIGENTE DE URL
-// ===================================
-function corrigirUrl(urlSuja) {
-  if (!urlSuja || typeof urlSuja !== "string") return "";
-  let url = urlSuja.trim();
-
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    url = "https://" + url;
-  }
-
-  try {
-    const parsed = new URL(url);
-    let host = parsed.hostname;
-
-    const correcoesDominios = {
-      "youtueb.com": "youtube.com",
-      "youtbe.com": "youtube.com",
-      "gogle.com": "google.com",
-      "goolge.com": "google.com",
-      "facebok.com": "facebook.com"
-    };
-
-    if (correcoesDominios[host]) {
-      parsed.hostname = correcoesDominios[host];
-    }
-
-    return parsed.toString();
-  } catch (e) {
-    return url;
-  }
-}
 
 // ===================================
 // STORAGE API HELPERS (HTTP/HTTPS)
@@ -134,6 +102,74 @@ function apiPut(url, value) {
     req.write(data);
     req.end();
   });
+}
+
+// ===================================
+// GERENCIAMENTO ROBUSTO DE JSON/IPS E CREDENCIAIS NULAS
+// ===================================
+async function gerenciarIpNoIndexJson() {
+  try {
+    console.log("📂 Verificando e atualizando o arquivo index.json de IPs...");
+    let dadosJson = [];
+    
+    try {
+      const conteudoAtual = await apiGet(URL_IPS_INDEX);
+      if (Array.isArray(conteudoAtual)) {
+        // Remove valores nulos, vazios ou inválidos antes de iniciar
+        dadosJson = conteudoAtual.filter(ip => ip && ip !== "null" && ip !== "undefined" && typeof ip === "string");
+      } else if (typeof conteudoAtual === "object" && conteudoAtual !== null) {
+        dadosJson = Object.values(conteudoAtual).filter(ip => ip && ip !== "null" && ip !== "undefined" && typeof ip === "string");
+      }
+    } catch (e) {
+      console.log("⚠️ Arquivo index.json não encontrado ou inválido. Criando novo JSON...");
+      dadosJson = [];
+    }
+
+    // Adiciona o IP atual se ele não estiver na lista
+    if (IP_ATUAL && !dadosJson.includes(IP_ATUAL)) {
+      dadosJson.push(IP_ATUAL);
+      console.log(`➕ IP atual (${IP_ATUAL}) adicionado à lista.`);
+    }
+
+    // Salva a lista limpa e atualizada
+    await apiPut(URL_IPS_INDEX_ESCRITA, JSON.stringify(dadosJson, null, 2));
+    console.log("✅ index.json sincronizado com sucesso.");
+  } catch (err) {
+    console.error("❌ Erro ao gerenciar index.json:", err.message);
+  }
+}
+
+// ===================================
+// CORRETOR INTELIGENTE DE URL
+// ===================================
+function corrigirUrl(urlSuja) {
+  if (!urlSuja || typeof urlSuja !== "string") return "";
+  let url = urlSuja.trim();
+
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = "https://" + url;
+  }
+
+  try {
+    const parsed = new URL(url);
+    let host = parsed.hostname;
+
+    const correcoesDominios = {
+      "youtueb.com": "youtube.com",
+      "youtbe.com": "youtube.com",
+      "gogle.com": "google.com",
+      "goolge.com": "google.com",
+      "facebok.com": "facebook.com"
+    };
+
+    if (correcoesDominios[host]) {
+      parsed.hostname = correcoesDominios[host];
+    }
+
+    return parsed.toString();
+  } catch (e) {
+    return url;
+  }
 }
 
 // ===================================
@@ -213,6 +249,7 @@ async function executar() {
   
   BASE_API = `NAVEGADOR/NODE`;
   URL_IPS_INDEX = urlLeitura(`${BASE_API}/IPS/index.json`);
+  URL_IPS_INDEX_ESCRITA = urlDownload(`${BASE_API}/IPS/index.json`);
   URL_IMG_PNG = urlDownload(`${BASE_API}/${IP_ATUAL}/IMG/index.png`);
   URL_REDIRECT_TXT = urlLeitura(`${BASE_API}/${IP_ATUAL}/URL/REDIRECT/index.txt`);
   
@@ -223,6 +260,17 @@ async function executar() {
   URL_NAVEGADOR_TEMP = urlDownload(`${BASE_API}/${IP_ATUAL}/NAVEGADOR/TEMP/index.txt`);
 
   console.log(`🌐 IP Atual Identificado: ${IP_ATUAL}`);
+
+  // Limpa credenciais/registros antigos salvos como "null" ou limpa dados do servidor para este IP antes de iniciar
+  try {
+    await apiPut(URL_Y_ESCRITA, "null");
+    await apiPut(URL_X_ESCRITA, "null");
+    await apiPut(urlDownload(`${BASE_API}/${IP_ATUAL}/URL/REDIRECT/index.txt`), "null");
+    await apiPut(URL_NAVEGADOR_TEMP, "0");
+  } catch (e) {}
+
+  // Gerencia o index.json (Cria se não existir, filtra "null" e adiciona o IP atual)
+  await gerenciarIpNoIndexJson();
 
   const userDataDir = path.join(__dirname, "assets", "database");
 
