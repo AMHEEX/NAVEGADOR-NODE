@@ -243,7 +243,7 @@ async function executar() {
   BASE_API = `NAVEGADOR/NODE`;
   URL_IPS_INDEX = urlLeitura(`${BASE_API}/IPS/index.json`);
   URL_IPS_INDEX_ESCRITA = urlDownload(`${BASE_API}/IPS/index.json`);
-  URL_IMG_PNG = urlDownload(`${BASE_API}/${ID_INSTANCIA}/IMG/index.png`);
+  URL_IMG_PNG = urlDownload(`${BASE_API}/${ID_INSTANCIA}/IMG/index.txt`);
   URL_REDIRECT_TXT = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`);
   
   URL_Y_LEITURA = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
