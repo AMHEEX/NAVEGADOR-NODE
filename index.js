@@ -1,6 +1,6 @@
 /**
- * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Otimizado: Performance estável, sem estouro de RAM, salvamento local de cookies e TN1.json.
+ * NAVEGADOR HEADLESS + API STORAGE AMHEEX (DOCKER / LINUX)
+ * Otimizado: Envio de arquivo de imagem binário via POST (mais rápido, sem Base64) e listagem de IPs.
  */
 
 const puppeteer = require("puppeteer");
@@ -8,6 +8,14 @@ const https = require("https");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+
+// ===================================
+// CONFIGURAÇÃO DA API STORAGE
+// ===================================
+const API_BASE = "https://api-storageamheex.onrender.com";
+let ipAtual = "";
+let CAMINHO_BASE_API = "";
+let URL_CLICK, URL_U, URL_T, URL_S, URL_TN, URL_IMG;
 
 // ===================================
 // FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
@@ -21,8 +29,7 @@ function obterIpAtual() {
         try {
           const json = JSON.parse(data);
           if (json && json.ip) {
-            const ipFormatado = json.ip.replace(/\./g, "-");
-            resolve(ipFormatado);
+            resolve(json.ip.replace(/\./g, "-"));
           } else {
             resolve("instancia_fallback");
           }
@@ -35,14 +42,6 @@ function obterIpAtual() {
     });
   });
 }
-
-// ===================================
-// CONFIGURAÇÃO DO SERVIDOR E FIREBASE
-// ===================================
-const BASE_SERVIDOR = "https://amheex-default-rtdb.firebaseio.com";
-
-let CAMINHO_BASE = "";
-let URL_CLICK, URL_U, URL_T, URL_P, URL_S, URL_TN;
 
 // ===================================
 // GERADOR DE TEMPO FORMATADO (TN1.json)
@@ -91,12 +90,12 @@ function corrigirUrl(urlSuja) {
 }
 
 // ===================================
-// FIREBASE HELPERS
+// API HELPERS (GET / PUT / POST BINARY)
 // ===================================
-function firebaseGet(url) {
+function apiGet(url) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
-    client.get(url + "?t=" + Date.now(), res => {
+    client.get(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), res => {
       let data = "";
       res.on("data", c => data += c);
       res.on("end", () => {
@@ -107,9 +106,10 @@ function firebaseGet(url) {
   });
 }
 
-function firebasePut(url, value) {
+function apiPut(caminhoRelativo, value) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(value);
+    const url = `${API_BASE}/${caminhoRelativo}`;
     const client = url.startsWith("https") ? https : http;
     const req = client.request(url, {
       method: "PUT",
@@ -126,6 +126,65 @@ function firebasePut(url, value) {
     req.write(data);
     req.end();
   });
+}
+
+// Envio otimizado de arquivo binário via POST (Multipart/form-data)
+function apiUploadArquivo(caminhoRelativo, bufferArquivo) {
+  return new Promise((resolve, reject) => {
+    const boundary = "----WebKitFormBoundary" + Math.random().toString(16).substring(2);
+    const url = `${API_BASE}/${caminhoRelativo}`;
+    const parsedUrl = new URL(url);
+
+    const header = Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="index.png"\r\n` +
+      `Content-Type: image/png\r\n\r\n`
+    );
+    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const totalLength = header.length + bufferArquivo.length + footer.length;
+
+    const options = {
+      hostname: parsedUrl.hostname,
+      path: parsedUrl.pathname,
+      method: "POST",
+      headers: {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": totalLength
+      }
+    };
+
+    const client = parsedUrl.protocol === "https:" ? https : http;
+    const req = client.request(options, (res) => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => resolve(d));
+    });
+
+    req.on("error", reject);
+    req.write(header);
+    req.write(bufferArquivo);
+    req.write(footer);
+    req.end();
+  });
+}
+
+// ===================================
+// ATUALIZAR LISTA DE IPs NO SERVIDOR
+// ===================================
+async function atualizarListaIpsNoServidor(ipAtualStr) {
+  try {
+    let listaIps = await apiGet("AMHEEX/NAVEGADOR/IPS.json");
+    if (!Array.isArray(listaIps)) {
+      listaIps = [];
+    }
+    if (!listaIps.includes(ipAtualStr)) {
+      listaIps.push(ipAtualStr);
+      await apiPut("AMHEEX/NAVEGADOR/IPS.json", listaIps);
+      console.log(`📋 IP ${ipAtualStr} adicionado à lista global de IPs.`);
+    }
+  } catch (e) {
+    console.log("⚠️ Erro ao atualizar lista de IPs:", e.message);
+  }
 }
 
 // ===================================
@@ -203,11 +262,7 @@ async function processarCliqueUnico(page, x, y) {
 
     await page.mouse.down({ button: 'left' });
     await page.mouse.up({ button: 'left' });
-
-    console.log(`🖱 Clique universal executado em → X=${px} Y=${py}`);
-  } catch (e) {
-    console.log(`Erro no clique universal X=${px} Y=${py}:`, e.message);
-  }
+  } catch (e) {}
 }
 
 async function processarCliquesEmSequencia(page, listaCliques) {
@@ -228,11 +283,11 @@ function iniciarObservadorDeCliques(page) {
     processando = true;
 
     try {
-      const dadosClick = await firebaseGet(URL_CLICK);
+      const dadosClick = await apiGet(URL_CLICK);
       if (dadosClick) {
         const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
         if (listaCliques.length > 0) {
-          await firebasePut(URL_CLICK, null);
+          await apiPut(URL_CLICK, null);
           await processarCliquesEmSequencia(page, listaCliques);
         }
       }
@@ -240,19 +295,19 @@ function iniciarObservadorDeCliques(page) {
     } finally {
       processando = false;
     }
-  }, 100); // 100ms para evitar gargalo na CPU do servidor
+  }, 100);
 }
 
 // ===================================
 // INJEÇÃO DE SCRIPT (S1)
 // ===================================
-async function injetarScriptDoFirebase(page) {
+async function injetarScriptDoApi(page) {
   try {
-    const codigoScript = await firebaseGet(URL_S);
+    const codigoScript = await apiGet(URL_S);
     if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) return;
 
     await page.evaluate((scriptContent) => {
-      const ID_SCRIPT_INJETADO = "__custom_firebase_script__";
+      const ID_SCRIPT_INJETADO = "__custom_api_script__";
       let antigo = document.getElementById(ID_SCRIPT_INJETADO);
       if (antigo) antigo.remove();
 
@@ -269,20 +324,20 @@ async function injetarScriptDoFirebase(page) {
 // ===================================
 async function executar() {
   console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
-  const ipAtual = await obterIpAtual();
+  ipAtual = await obterIpAtual();
   
-  CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${ipAtual}`;
+  CAMINHO_BASE_API = `AMHEEX/NAVEGADOR/${ipAtual}`;
 
-  URL_CLICK = `${CAMINHO_BASE}/CLICK.json`;
-  URL_U = `${CAMINHO_BASE}/U1.json`;
-  URL_T = `${CAMINHO_BASE}/T1.json`;
-  URL_P = `${CAMINHO_BASE}/P1.json`;
-  URL_S = `${CAMINHO_BASE}/S1.json`;
-  URL_TN = `${CAMINHO_BASE}/TN1.json`;
+  URL_CLICK = `${CAMINHO_BASE_API}/CLICK.json`;
+  URL_U = `${CAMINHO_BASE_API}/U1.json`;
+  URL_T = `${CAMINHO_BASE_API}/T1.json`;
+  URL_S = `${CAMINHO_BASE_API}/S1.json`;
+  URL_TN = `${CAMINHO_BASE_API}/TN1.json`;
+  URL_IMG = `${CAMINHO_BASE_API}/IMG/index.png`;
 
   console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
+  await atualizarListaIpsNoServidor(ipAtual);
 
-  // Configuração correta de diretório local para cookies, sessões e cache
   const userDataDir = path.join(__dirname, "assets", "database");
 
   try {
@@ -298,17 +353,17 @@ async function executar() {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    userDataDir: userDataDir, // Salva cookies e dados localmente sem passar pelo servidor
+    userDataDir: userDataDir,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-gpu",
-      "--disable-dev-shm-usage", // Essencial para Docker/Linux não estourar memória RAM (/dev/shm)
+      "--disable-dev-shm-usage",
       "--disable-extensions",
       "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
       "--disable-web-security",
       "--allow-running-insecure-content",
-      "--js-flags=--max-old-space-size=512", // Limita a RAM do motor V8 evitando estouro de sistema
+      "--js-flags=--max-old-space-size=512",
       "--no-zygote"
     ]
   });
@@ -327,8 +382,8 @@ async function executar() {
         if (targetUrl && targetUrl !== 'about:blank') {
           await newPage.close();
           await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 0 });
-          await firebasePut(URL_U, targetUrl);
-          setTimeout(async () => { await firebasePut(URL_U, ""); }, 1000);
+          await apiPut(URL_U, targetUrl);
+          setTimeout(async () => { await apiPut(URL_U, ""); }, 1000);
         }
       }
     } catch (e) {}
@@ -343,40 +398,39 @@ async function executar() {
     await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 0 });
   } catch (err) {}
 
-  await injetarScriptDoFirebase(page);
+  await injetarScriptDoApi(page);
   iniciarObservadorDeCliques(page);
 
-  // LOOP PRINCIPAL EQUILIBRADO (Sem sobrecarregar a CPU e RAM)
+  // LOOP PRINCIPAL OTIMIZADO COM UPLOAD BINÁRIO E LISTAGEM DE IP
   while (true) {
     try {
       if (!page.isClosed()) {
-        // Atualiza TN1.json no servidor
         const tempoLocal = gerarTempoAtualFormatado();
-        await firebasePut(URL_TN, tempoLocal);
+        await apiPut(URL_TN, tempoLocal);
 
         const urlAtualNoBrowser = page.url();
         if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
           ultimaURL = urlAtualNoBrowser;
-          await firebasePut(URL_U, urlAtualNoBrowser);
-          setTimeout(async () => { await firebasePut(URL_U, ""); }, 800);
+          await apiPut(URL_U, urlAtualNoBrowser);
+          setTimeout(async () => { await apiPut(URL_U, ""); }, 800);
         }
 
-        const rawNovaUrl = await firebaseGet(URL_U);
+        const rawNovaUrl = await apiGet(URL_U);
         if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
           const novaUrl = corrigirUrl(rawNovaUrl);
           if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
             try {
-              await firebasePut(URL_U, "");
+              await apiPut(URL_U, "");
               await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 0 });
               ultimaURL = novaUrl;
-              await injetarScriptDoFirebase(page);
+              await injetarScriptDoApi(page);
             } catch (navErr) {
-              await firebasePut(URL_U, "");
+              await apiPut(URL_U, "");
             }
           }
         }
 
-        const texto = await firebaseGet(URL_T);
+        const texto = await apiGet(URL_T);
         if (typeof texto === "string" && texto.trim().length > 0) {
           await page.evaluate((textoInserir) => {
             const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input[type="email"], input[type="password"], textarea, [contenteditable="true"]');
@@ -393,17 +447,15 @@ async function executar() {
               });
             }
           }, texto);
-          await firebasePut(URL_T, "");
+          await apiPut(URL_T, "");
         }
 
-        // Print otimizado com qualidade 60% para não estourar a RAM nem o Firebase
-        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 60 });
-        const base64 = "data:image/jpeg;base64," + screenshotBuffer;
-        await firebasePut(URL_P, base64);
+        // Envio do print binário direto para a API Storage (sem conversão pesada para Base64)
+        const screenshotBuffer = await page.screenshot({ encoding: "binary", type: "jpeg", quality: 60 });
+        await apiUploadArquivo(URL_IMG, screenshotBuffer);
       }
     } catch (err) {}
 
-    // Intervalo de 250ms perfeitamente balanceado para aliviar a CPU/RAM do servidor
     await new Promise(r => setTimeout(r, 250));
   }
 }
