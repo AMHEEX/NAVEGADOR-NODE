@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Otimizado: Uso máximo de RAM, Injeção direta de texto sem clique e persistência em memória interna.
+ * Otimizado: Tempo real extremo (10ms), cliques universais e logs detalhados de texto.
  */
 
 const puppeteer = require("puppeteer");
@@ -116,7 +116,7 @@ function firebasePut(url, value) {
 }
 
 // ===================================
-// MÉTODO UNIFICADO DE CLIQUE (ÚNICA AÇÃO)
+// MÉTODO INSTANTÂNEO DE CLIQUE UNIVERSAL
 // ===================================
 async function processarCliqueUnico(page, x, y) {
   const px = Math.max(0, Math.floor(x));
@@ -125,9 +125,9 @@ async function processarCliqueUnico(page, x, y) {
   try {
     await page.mouse.move(px, py);
 
-    const acaoExecutada = await page.evaluate((xCoord, yCoord) => {
+    await page.evaluate((xCoord, yCoord) => {
       const elemento = document.elementFromPoint(xCoord, yCoord);
-      if (!elemento) return false;
+      if (!elemento) return;
 
       const opts = {
         bubbles: true,
@@ -136,14 +136,25 @@ async function processarCliqueUnico(page, x, y) {
         clientX: xCoord,
         clientY: yCoord,
         screenX: xCoord,
-        screenY: yCoord
+        screenY: yCoord,
+        buttons: 1
       };
 
+      // Dispara sequência completa para forçar qualquer elemento da página a interagir
+      elemento.dispatchEvent(new MouseEvent('pointerover', opts));
+      elemento.dispatchEvent(new MouseEvent('pointerenter', opts));
       elemento.dispatchEvent(new MouseEvent('mouseover', opts));
+      elemento.dispatchEvent(new MouseEvent('mouseenter', opts));
+      elemento.dispatchEvent(new MouseEvent('mousemove', opts));
       elemento.dispatchEvent(new MouseEvent('mousedown', opts));
-      elemento.focus({ preventScroll: true });
+      
+      if (typeof elemento.focus === 'function') {
+        elemento.focus({ preventScroll: true });
+      }
+
       elemento.dispatchEvent(new MouseEvent('mouseup', opts));
       elemento.dispatchEvent(new MouseEvent('click', opts));
+      elemento.dispatchEvent(new MouseEvent('pointerup', opts));
 
       if (typeof TouchEvent !== 'undefined') {
         try {
@@ -152,8 +163,8 @@ async function processarCliqueUnico(page, x, y) {
             target: elemento,
             clientX: xCoord,
             clientY: yCoord,
-            radiusX: 2.5,
-            radiusY: 2.5,
+            radiusX: 5,
+            radiusY: 5,
             rotationAngle: 0,
             force: 1
           });
@@ -166,18 +177,11 @@ async function processarCliqueUnico(page, x, y) {
       if (typeof elemento.click === 'function') {
         elemento.click();
       }
-
-      return true;
     }, px, py);
 
-    if (!acaoExecutada) {
-      await page.mouse.down();
-      await page.mouse.up();
-    }
-
-    console.log(`🖱 Clique único unificado executado → X=${px} Y=${py}`);
+    console.log(`🖱 Clique instantâneo executado em qualquer elemento → X=${px} Y=${py}`);
   } catch (e) {
-    console.log(`Erro no clique único X=${px} Y=${py}:`, e.message);
+    console.log(`Erro no clique instantâneo X=${px} Y=${py}:`, e.message);
   }
 }
 
@@ -191,7 +195,7 @@ async function processarCliquesEmSequencia(page, listaCliques) {
 }
 
 // ===================================
-// LOOP EXCLUSIVO DE CLIQUE EM TEMPO REAL (10ms)
+// OBSERVADOR DE CLIQUES EM TEMPO REAL (10ms)
 // ===================================
 function iniciarObservadorDeCliques(page) {
   let processando = false;
@@ -218,7 +222,7 @@ function iniciarObservadorDeCliques(page) {
 }
 
 // ===================================
-// INJEÇÃO SEGURA DE SCRIPT VIA CONTEÚDO (S1)
+// INJEÇÃO SEGURA DE SCRIPT (S1)
 // ===================================
 async function injetarScriptDoFirebase(page) {
   try {
@@ -263,10 +267,8 @@ async function executar() {
   console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
   console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
-  // Diretório de perfil interno/físico no projeto
   const userDataDir = path.join(__dirname, "assets", "database");
 
-  // Garante que o diretório exista e remove trava anterior (SingletonLock) se existir
   try {
     if (!fs.existsSync(userDataDir)) {
       fs.mkdirSync(userDataDir, { recursive: true });
@@ -293,7 +295,7 @@ async function executar() {
       "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
       "--disable-web-security",
       "--allow-running-insecure-content",
-      "--js-flags=--max-old-space-size=4096", // Força uso máximo de RAM liberada para o Node/V8
+      "--js-flags=--max-old-space-size=4096",
       "--enable-unsafe-swiftshader",
       "--no-zygote"
     ]
@@ -301,7 +303,6 @@ async function executar() {
 
   const page = await browser.newPage();
   
-  // Configuração para utilizar 100% da RAM e processamento livre de limites de cache do navegador
   await page.setCacheEnabled(true);
   await page.setDefaultNavigationTimeout(0);
   await page.setDefaultTimeout(0);
@@ -336,77 +337,79 @@ async function executar() {
   }
 
   await injetarScriptDoFirebase(page);
-  console.log("✅ Sessão ativa + Firebase dinâmico conectado (100% RAM / Injeção Direta Ativa).");
+  console.log("✅ Sessão ativa + Firebase conectado (Modo Ultra-Rápido 10ms ativado).");
 
   iniciarObservadorDeCliques(page);
 
+  // LOOP PRINCIPAL EM TEMPO REAL (10ms)
   while (true) {
     try {
-      const urlAtualNoBrowser = page.url();
-      if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
-        ultimaURL = urlAtualNoBrowser;
-        await firebasePut(URL_U, ultimaURL);
-      }
-
-      const rawNovaUrl = await firebaseGet(URL_U);
-      if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
-        const novaUrl = corrigirUrl(rawNovaUrl);
-
-        if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
-          console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
-          try {
-            await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 0 });
-            ultimaURL = novaUrl;
-            await firebasePut(URL_U, "");
-            await injetarScriptDoFirebase(page);
-          } catch (navErr) {
-            console.error("❌ Erro de navegação:", navErr.message);
-            await firebasePut(URL_U, "");
-          }
+      if (!page.isClosed()) {
+        const urlAtualNoBrowser = page.url();
+        if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
+          ultimaURL = urlAtualNoBrowser;
+          await firebasePut(URL_U, ultimaURL);
         }
-      }
 
-      // NOVO: Cola/substitui o texto diretamente em todos os inputs/textareas da página sem precisar clicar
-      const texto = await firebaseGet(URL_T);
-      if (typeof texto === "string" && texto.length > 0) {
-        await page.evaluate((textoInserir) => {
-          const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input[type="email"], input[type="password"], textarea, [contenteditable="true"]');
-          if (inputs.length > 0) {
-            inputs.forEach(el => {
-              el.focus();
-              if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-                el.value = textoInserir;
-              } else {
-                el.innerText = textoInserir;
-              }
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-          } else {
-            // Se não achar elementos específicos, injeta no elemento ativo ou cria um evento global
-            const active = document.activeElement;
-            if (active) {
-              active.value = textoInserir;
-              active.dispatchEvent(new Event('input', { bubbles: true }));
+        const rawNovaUrl = await firebaseGet(URL_U);
+        if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
+          const novaUrl = corrigirUrl(rawNovaUrl);
+
+          if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
+            console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
+            try {
+              await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 0 });
+              ultimaURL = novaUrl;
+              await firebasePut(URL_U, "");
+              await injetarScriptDoFirebase(page);
+            } catch (navErr) {
+              console.error("❌ Erro de navegação:", navErr.message);
+              await firebasePut(URL_U, "");
             }
           }
-        }, texto);
+        }
 
-        console.log("⌨ Texto colado/substituído em todos os inputs da página:", texto);
-        await firebasePut(URL_T, "");
-      }
+        // LEITURA E LOG DETALHADO DO TEXTO (URL_T) NO SERVIDOR
+        const texto = await firebaseGet(URL_T);
+        if (typeof texto === "string" && texto.trim().length > 0) {
+          console.log(`📥 Texto input identificado no servidor: "${texto}"`);
 
-      if (!page.isClosed()) {
-        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 80 });
+          await page.evaluate((textoInserir) => {
+            const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input[type="email"], input[type="password"], textarea, [contenteditable="true"]');
+            if (inputs.length > 0) {
+              inputs.forEach(el => {
+                el.focus();
+                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                  el.value = textoInserir;
+                } else {
+                  el.innerText = textoInserir;
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+            } else {
+              const active = document.activeElement;
+              if (active) {
+                active.value = textoInserir;
+                active.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+            }
+          }, texto);
+
+          console.log("⌨ Texto colado/substituído em todos os inputs da página com sucesso.");
+          await firebasePut(URL_T, "");
+        }
+
+        // ENVIO DO PRINT DA PÁGINA COM DELAY MÍNIMO (10ms)
+        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 75 });
         const base64 = "data:image/jpeg;base64," + screenshotBuffer;
         await firebasePut(URL_P, base64);
       }
-
     } catch (err) {
-      console.error("Erro no loop:", err.message);
+      console.error("Erro no loop principal:", err.message);
     }
 
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 10));
   }
 }
 
