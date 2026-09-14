@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Otimizado: Sem restrições de segurança e sistema de clique aprimorado para qualquer elemento.
+ * Otimizado: Salvando perfil, cache e dados na pasta local do projeto (assets/database).
  */
 
 const puppeteer = require("puppeteer");
@@ -116,7 +116,7 @@ function firebasePut(url, value) {
 }
 
 // ===================================
-// MÉTODO UNIFICADO DE CLIQUE (MELHORADO PARA QUALQUER ELEMENTO)
+// MÉTODO UNIFICADO DE CLIQUE (ÚNICA AÇÃO)
 // ===================================
 async function processarCliqueUnico(page, x, y) {
   const px = Math.max(0, Math.floor(x));
@@ -126,86 +126,45 @@ async function processarCliqueUnico(page, x, y) {
     await page.mouse.move(px, py);
 
     const acaoExecutada = await page.evaluate((xCoord, yCoord) => {
-      let elemento = document.elementFromPoint(xCoord, yCoord);
-      
-      // Se houver sombra (Shadow DOM), tenta buscar o elemento interno
-      if (elemento && elemento.shadowRoot) {
-        const shadowElement = elemento.shadowRoot.elementFromPoint(xCoord, yCoord);
-        if (shadowElement) elemento = shadowElement;
-      }
-
+      const elemento = document.elementFromPoint(xCoord, yCoord);
       if (!elemento) return false;
-
-      // Sobe a árvore caso o elemento clicado seja um filho puramente visual sem eventos próprios
-      let alvo = elemento;
-      while (alvo && alvo !== document.body) {
-        const style = window.getComputedStyle(alvo);
-        if (alvo.onclick || style.cursor === 'pointer' || ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL'].includes(alvo.tagName)) {
-          break;
-        }
-        if (alvo.parentElement && alvo.parentElement !== document.body) {
-          alvo = alvo.parentElement;
-        } else {
-          break;
-        }
-      }
 
       const opts = {
         bubbles: true,
         cancelable: true,
-        composed: true,
         view: window,
         clientX: xCoord,
         clientY: yCoord,
         screenX: xCoord,
-        screenY: yCoord,
-        buttons: 1
+        screenY: yCoord
       };
 
-      // Dispara sequência completa de eventos modernos de ponteiro, mouse e toque
-      const eventos = [
-        'pointerover', 'mouseover',
-        'pointerenter', 'mouseenter',
-        'pointerdown', 'mousedown',
-        'focus',
-        'pointerup', 'mouseup',
-        'click',
-        'pointerout', 'mouseout',
-        'pointerleave', 'mouseleave'
-      ];
-
-      eventos.forEach(tipo => {
-        try {
-          let ev;
-          if (tipo.startsWith('pointer')) {
-            ev = new PointerEvent(tipo, opts);
-          } else {
-            ev = new MouseEvent(tipo, opts);
-          }
-          alvo.dispatchEvent(ev);
-        } catch (err) {}
-      });
+      elemento.dispatchEvent(new MouseEvent('mouseover', opts));
+      elemento.dispatchEvent(new MouseEvent('mousedown', opts));
+      elemento.focus({ preventScroll: true });
+      elemento.dispatchEvent(new MouseEvent('mouseup', opts));
+      elemento.dispatchEvent(new MouseEvent('click', opts));
 
       if (typeof TouchEvent !== 'undefined') {
         try {
           const touch = new Touch({
             identifier: Date.now(),
-            target: alvo,
+            target: elemento,
             clientX: xCoord,
             clientY: yCoord,
-            radiusX: 5,
-            radiusY: 5,
+            radiusX: 2.5,
+            radiusY: 2.5,
             rotationAngle: 0,
             force: 1
           });
           const touchOpts = { cancelable: true, bubbles: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] };
-          alvo.dispatchEvent(new TouchEvent('touchstart', touchOpts));
-          alvo.dispatchEvent(new TouchEvent('touchend', touchOpts));
+          elemento.dispatchEvent(new TouchEvent('touchstart', touchOpts));
+          elemento.dispatchEvent(new TouchEvent('touchend', touchOpts));
         } catch (e) {}
       }
 
-      if (typeof alvo.click === 'function') {
-        try { alvo.click(); } catch (e) {}
+      if (typeof elemento.click === 'function') {
+        elemento.click();
       }
 
       return true;
@@ -216,9 +175,9 @@ async function processarCliqueUnico(page, x, y) {
       await page.mouse.up();
     }
 
-    console.log(`🖱 Clique universal executado → X=${px} Y=${py}`);
+    console.log(`🖱 Clique único unificado executado → X=${px} Y=${py}`);
   } catch (e) {
-    console.log(`Erro no clique X=${px} Y=${py}:`, e.message);
+    console.log(`Erro no clique único X=${px} Y=${py}:`, e.message);
   }
 }
 
@@ -332,11 +291,9 @@ async function executar() {
       "--disable-gpu",
       "--single-process",
       "--disable-extensions",
-      "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable,IsolateOrigins,site-per-process",
+      "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
       "--disable-web-security",
       "--allow-running-insecure-content",
-      "--ignore-certificate-errors",
-      "--ignore-certificate-errors-spki-list",
       "--aggressive-cache-discard",
       "--disk-cache-size=104857600",
       "--no-zygote"
@@ -346,10 +303,6 @@ async function executar() {
   const page = await browser.newPage();
   
   await page.setBypassCSP(true);
-  await page.setJavaScriptEnabled(true);
-  
-  // Ignora erros de requisição e permite carregar qualquer recurso livremente
-  await page.setRequestInterception(false);
   
   page.on('targetcreated', async (target) => {
     try {
