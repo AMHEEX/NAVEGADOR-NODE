@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Atualizado com Envio de Screenshot em Base64 para IMG/index.txt
+ * Atualizado com leitura, colagem automática em inputs e limpeza do arquivo de texto
  */
 
 const puppeteer = require("puppeteer");
@@ -29,6 +29,7 @@ function urlDownload(caminhoRelativo) {
 // GERADOR DE ID ÚNICO PARA A INSTÂNCIA
 // ===================================
 const ID_INSTANCIA = "node_" + crypto.randomBytes(4).toString("hex");
+const DATA_HORA_INICIO = new Date().toISOString();
 
 // ===================================
 // VARIÁVEIS DE CAMINHO DA API
@@ -36,13 +37,14 @@ const ID_INSTANCIA = "node_" + crypto.randomBytes(4).toString("hex");
 let BASE_API = "";
 let URL_IPS_INDEX = "";
 let URL_IPS_INDEX_ESCRITA = "";
-let URL_IMG_TXT = ""; // Alterado para salvar em .txt
+let URL_IMG_TXT = ""; 
 let URL_REDIRECT_TXT = "";
 let URL_Y_LEITURA = "";
 let URL_X_LEITURA = "";
 let URL_Y_ESCRITA = "";
 let URL_X_ESCRITA = "";
-let URL_NAVEGADOR_TEMP = "";
+let URL_TEXT_INPUT_LEITURA = "";
+let URL_TEXT_INPUT_ESCRITA = "";
 
 // ===================================
 // STORAGE API HELPERS (HTTP/HTTPS)
@@ -96,7 +98,27 @@ function apiPut(url, value) {
 }
 
 // ===================================
-// GERENCIAMENTO ROBUSTO DE INSTÂNCIAS COM TIMESTAMP
+// BUSCAR IP PÚBLICO ATUAL
+// ===================================
+function obterIpPublico() {
+  return new Promise((resolve) => {
+    https.get("https://api.ipify.org?format=json", (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed.ip || "IP_DESCONHECIDO");
+        } catch {
+          resolve("IP_DESCONHECIDO");
+        }
+      });
+    }).on("error", () => resolve("IP_DESCONHECIDO"));
+  });
+}
+
+// ===================================
+// GERENCIAMENTO NO INDEX.JSON
 // ===================================
 async function gerenciarIpNoIndexJson() {
   try {
@@ -113,20 +135,17 @@ async function gerenciarIpNoIndexJson() {
       listaInstancias = [];
     }
 
-    const agora = Date.now();
-    listaInstancias = listaInstancias.filter(item => {
-      if (!item) return false;
-      if (typeof item === "string") return true; 
-      if (item.expiraEm && item.expiraEm > agora && item.id !== ID_INSTANCIA) return true;
-      return false;
-    });
+    listaInstancias = listaInstancias.filter(i => (typeof i === "string" ? i !== ID_INSTANCIA : i.id !== ID_INSTANCIA));
+
+    const ipPublicoAtual = await obterIpPublico();
 
     const novaInstancia = {
       id: ID_INSTANCIA,
-      expiraEm: agora + 25000 
+      dataHoraInicio: DATA_HORA_INICIO,
+      dataHoraAtual: new Date().toISOString(),
+      ipPublico: ipPublicoAtual
     };
 
-    listaInstancias = listaInstancias.filter(i => (typeof i === "string" ? i !== ID_INSTANCIA : i.id !== ID_INSTANCIA));
     listaInstancias.push(novaInstancia);
 
     await apiPut(URL_IPS_INDEX_ESCRITA, JSON.stringify(listaInstancias, null, 2));
@@ -234,6 +253,39 @@ function iniciarObservadorDeCliques(page) {
 }
 
 // ===================================
+// OBSERVADOR DE TEXTO PARA INSERÇÃO EM INPUTS
+// ===================================
+function iniciarObservadorDeTextoInput(page) {
+  setInterval(async () => {
+    if (!URL_TEXT_INPUT_LEITURA || page.isClosed()) return;
+
+    try {
+      const textoRecebido = await apiGet(URL_TEXT_INPUT_LEITURA);
+
+      if (typeof textoRecebido === "string" && textoRecebido.trim().length > 0 && textoRecebido.trim() !== "null") {
+        console.log(`📥 Texto recebido para colar nos inputs: "${textoRecebido}"`);
+
+        // Apaga o conteúdo da API imediatamente para evitar loops/duplicações
+        await apiPut(URL_TEXT_INPUT_ESCRITA, "null");
+
+        // Identifica e preenche todos os inputs/textareas visíveis na página ativa
+        await page.evaluate((textoParaColar) => {
+          const inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea');
+          inputs.forEach(input => {
+            input.focus();
+            input.value = textoParaColar;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+        }, textoRecebido.trim());
+
+        console.log("✍️ Texto colado com sucesso em todos os inputs identificados.");
+      }
+    } catch (err) {}
+  }, 1000);
+}
+
+// ===================================
 // PRINCIPAL
 // ===================================
 async function executar() {
@@ -243,22 +295,22 @@ async function executar() {
   URL_IPS_INDEX = urlLeitura(`${BASE_API}/IPS/index.json`);
   URL_IPS_INDEX_ESCRITA = urlDownload(`${BASE_API}/IPS/index.json`);
   
-  // Alterado de index.json para index.txt para salvar o Base64 em texto puro
   URL_IMG_TXT = urlDownload(`${BASE_API}/${ID_INSTANCIA}/IMG/index.txt`);
-  
   URL_REDIRECT_TXT = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`);
   
   URL_Y_LEITURA = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
   URL_X_LEITURA = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/X/index.txt`);
   URL_Y_ESCRITA = urlDownload(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
   URL_X_ESCRITA = urlDownload(`${BASE_API}/${ID_INSTANCIA}/X/index.txt`);
-  URL_NAVEGADOR_TEMP = urlDownload(`${BASE_API}/${ID_INSTANCIA}/NAVEGADOR/TEMP/index.txt`);
+
+  // Caminhos para leitura e escrita do texto de inputs
+  URL_TEXT_INPUT_LEITURA = urlLeitura(`${BASE_API}/TEXT/INPUT/index.txt`);
+  URL_TEXT_INPUT_ESCRITA = urlDownload(`${BASE_API}/TEXT/INPUT/index.txt`);
 
   try {
     await apiPut(URL_Y_ESCRITA, "null");
     await apiPut(URL_X_ESCRITA, "null");
     await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
-    await apiPut(URL_NAVEGADOR_TEMP, "0");
   } catch (e) {}
 
   await gerenciarIpNoIndexJson();
@@ -302,8 +354,8 @@ async function executar() {
   } catch (err) {}
 
   iniciarObservadorDeCliques(page);
+  iniciarObservadorDeTextoInput(page);
 
-  let tempoInicio = Date.now();
   let contadorHeartbeat = 0;
 
   while (true) {
@@ -329,10 +381,6 @@ async function executar() {
         }
       }
 
-      // Salva o tempo atual do navegador
-      const tempoDecorrido = Math.floor((Date.now() - tempoInicio) / 1000);
-      await apiPut(URL_NAVEGADOR_TEMP, String(tempoDecorrido));
-
       // Salva Screenshot atual convertido para Base64 (string) em IMG/index.txt via POST
       if (!page.isClosed()) {
         const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 50 });
@@ -341,7 +389,7 @@ async function executar() {
         await apiPut(URL_IMG_TXT, screenshotBase64);
       }
 
-      // Atualiza o heartbeat a cada 10 segundos
+      // Atualiza o heartbeat e os dados no index.json a cada 10 segundos
       contadorHeartbeat++;
       if (contadorHeartbeat >= 10) {
         contadorHeartbeat = 0;
