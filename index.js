@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Otimizado: Salvando perfil, cache e dados na pasta local do projeto (assets/database).
+ * Otimizado: Tempo real extremo, sem delay, cliques universais em qualquer elemento/coordenada.
  */
 
 const puppeteer = require("puppeteer");
@@ -21,8 +21,7 @@ function obterIpAtual() {
         try {
           const json = JSON.parse(data);
           if (json && json.ip) {
-            const ipFormatado = json.ip.replace(/\./g, "-");
-            resolve(ipFormatado);
+            resolve(json.ip.replace(/\./g, "-"));
           } else {
             resolve("instancia_fallback");
           }
@@ -30,9 +29,7 @@ function obterIpAtual() {
           resolve("instancia_fallback");
         }
       });
-    }).on("error", () => {
-      resolve("instancia_fallback");
-    });
+    }).on("error", () => resolve("instancia_fallback"));
   });
 }
 
@@ -78,10 +75,10 @@ function corrigirUrl(urlSuja) {
 }
 
 // ===================================
-// FIREBASE HELPERS
+// FIREBASE HELPERS (SEM DELAY)
 // ===================================
 function firebaseGet(url) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const client = url.startsWith("https") ? https : http;
     client.get(url + "?t=" + Date.now(), res => {
       let data = "";
@@ -90,131 +87,142 @@ function firebaseGet(url) {
         try { resolve(JSON.parse(data)); }
         catch { resolve(null); }
       });
-    }).on("error", reject);
+    }).on("error", () => resolve(null));
   });
 }
 
 function firebasePut(url, value) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(value);
-    const client = url.startsWith("https") ? https : http;
-    const req = client.request(url, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(data)
-      }
-    }, res => {
-      let d = "";
-      res.on("data", c => d += c);
-      res.on("end", () => resolve(d));
-    });
-    req.on("error", reject);
-    req.write(data);
-    req.end();
+  return new Promise((resolve) => {
+    try {
+      const data = JSON.stringify(value);
+      const client = url.startsWith("https") ? https : http;
+      const req = client.request(url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(data)
+        }
+      }, res => {
+        let d = "";
+        res.on("data", c => d += c);
+        res.on("end", () => resolve(d));
+      });
+      req.on("error", () => resolve(null));
+      req.write(data);
+      req.end();
+    } catch (e) {
+      resolve(null);
+    }
   });
 }
 
 // ===================================
-// MÉTODO UNIFICADO DE CLIQUE (ÚNICA AÇÃO)
+// MÉTODO UNIFICADO DE CLIQUE UNIVERSAL E INSTANTÂNEO
 // ===================================
 async function processarCliqueUnico(page, x, y) {
   const px = Math.max(0, Math.floor(x));
   const py = Math.max(0, Math.floor(y));
 
   try {
-    await page.mouse.move(px, py);
-
-    const acaoExecutada = await page.evaluate((xCoord, yCoord) => {
-      const elemento = document.elementFromPoint(xCoord, yCoord);
-      if (!elemento) return false;
-
-      const opts = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: xCoord,
-        clientY: yCoord,
-        screenX: xCoord,
-        screenY: yCoord
-      };
-
-      elemento.dispatchEvent(new MouseEvent('mouseover', opts));
-      elemento.dispatchEvent(new MouseEvent('mousedown', opts));
-      elemento.focus({ preventScroll: true });
-      elemento.dispatchEvent(new MouseEvent('mouseup', opts));
-      elemento.dispatchEvent(new MouseEvent('click', opts));
-
-      if (typeof TouchEvent !== 'undefined') {
+    // Executa em paralelo movimento e disparo de eventos profundos no DOM
+    await Promise.all([
+      page.mouse.move(px, py).catch(() => {}),
+      page.evaluate((xCoord, yCoord) => {
         try {
-          const touch = new Touch({
-            identifier: Date.now(),
-            target: elemento,
+          // Pega qualquer elemento na coordenada exata, inclusive overlays e filhos
+          let elemento = document.elementFromPoint(xCoord, yCoord);
+          if (!elemento) elemento = document.body || document.documentElement;
+
+          const opts = {
+            bubbles: true,
+            cancelable: true,
+            view: window,
             clientX: xCoord,
             clientY: yCoord,
-            radiusX: 2.5,
-            radiusY: 2.5,
-            rotationAngle: 0,
-            force: 1
+            screenX: xCoord,
+            screenY: yCoord,
+            buttons: 1
+          };
+
+          // Dispara todos os eventos simulando clique real do mouse e toque
+          ['mouseover', 'mousedown', 'mouseup', 'click', 'auxclick', 'contextmenu'].forEach(evtType => {
+            elemento.dispatchEvent(new MouseEvent(evtType, opts));
           });
-          const touchOpts = { cancelable: true, bubbles: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] };
-          elemento.dispatchEvent(new TouchEvent('touchstart', touchOpts));
-          elemento.dispatchEvent(new TouchEvent('touchend', touchOpts));
-        } catch (e) {}
-      }
 
-      if (typeof elemento.click === 'function') {
-        elemento.click();
-      }
+          if (typeof TouchEvent !== 'undefined') {
+            const touch = new Touch({
+              identifier: Date.now(),
+              target: elemento,
+              clientX: xCoord,
+              clientY: yCoord,
+              radiusX: 5,
+              radiusY: 5,
+              rotationAngle: 0,
+              force: 1
+            });
+            const touchOpts = { cancelable: true, bubbles: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] };
+            ['touchstart', 'touchend', 'touchmove'].forEach(evtType => {
+              elemento.dispatchEvent(new TouchEvent(evtType, touchOpts));
+            });
+          }
 
-      return true;
-    }, px, py);
+          if (typeof elemento.click === 'function') {
+            elemento.click();
+          }
+        } catch (err) {}
+      }, px, py)
+    ]);
 
-    if (!acaoExecutada) {
-      await page.mouse.down();
-      await page.mouse.up();
-    }
+    // Força o clique nativo do Puppeteer de forma redundante para garantir acionamento físico
+    await page.mouse.down().catch(() => {});
+    await page.mouse.up().catch(() => {});
 
-    console.log(`🖱 Clique único unificado executado → X=${px} Y=${py}`);
+    console.log(`🖱 Clique instantâneo universal executado → X=${px} Y=${py}`);
   } catch (e) {
-    console.log(`Erro no clique único X=${px} Y=${py}:`, e.message);
+    // Exceções silenciadas para máxima performance sem travar o fluxo
   }
 }
 
 async function processarCliquesEmSequencia(page, listaCliques) {
   if (!Array.isArray(listaCliques) || listaCliques.length === 0) return;
-
   for (const item of listaCliques) {
-    if (!item || typeof item.x !== "number" || typeof item.y !== "number") continue;
-    await processarCliqueUnico(page, item.x, item.y);
+    if (item && typeof item.x === "number" && typeof item.y === "number") {
+      processarCliqueUnico(page, item.x, item.y); // Executa assíncronamente sem esperar o próximo para zerar delay
+    }
   }
 }
 
 // ===================================
-// LOOP EXCLUSIVO DE CLIQUE EM TEMPO REAL (10ms)
+// LOOP DE CLIQUE EM TEMPO REAL REAL (0ms / SETIMMEDIATE)
 // ===================================
 function iniciarObservadorDeCliques(page) {
   let processando = false;
 
-  setInterval(async () => {
-    if (processando || !URL_CLICK || page.isClosed()) return;
-    processando = true;
+  const verificarCliques = async () => {
+    if (!URL_CLICK || page.isClosed()) return;
 
-    try {
-      const dadosClick = await firebaseGet(URL_CLICK);
-      if (dadosClick) {
-        const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
-        if (listaCliques.length > 0) {
-          await firebasePut(URL_CLICK, null);
-          await processarCliquesEmSequencia(page, listaCliques);
+    if (!processando) {
+      processando = true;
+      try {
+        const dadosClick = await firebaseGet(URL_CLICK);
+        if (dadosClick) {
+          const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
+          if (listaCliques.length > 0) {
+            await firebasePut(URL_CLICK, null);
+            processarCliquesEmSequencia(page, listaCliques);
+          }
         }
+      } catch (err) {
+        // Ignora erros
+      } finally {
+        processando = false;
       }
-    } catch (err) {
-      // Ignora erros pontuais
-    } finally {
-      processando = false;
     }
-  }, 10);
+
+    setImmediate(verificarCliques);
+  };
+
+  setImmediate(verificarCliques);
 }
 
 // ===================================
@@ -223,26 +231,21 @@ function iniciarObservadorDeCliques(page) {
 async function injetarScriptDoFirebase(page) {
   try {
     const codigoScript = await firebaseGet(URL_S);
-    
-    if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) {
-      return;
-    }
+    if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) return;
 
     await page.evaluate((scriptContent) => {
-      const ID_SCRIPT_INJETADO = "__custom_firebase_script__";
-      let antigo = document.getElementById(ID_SCRIPT_INJETADO);
-      if (antigo) antigo.remove();
+      try {
+        const ID_SCRIPT_INJETADO = "__custom_firebase_script__";
+        let antigo = document.getElementById(ID_SCRIPT_INJETADO);
+        if (antigo) antigo.remove();
 
-      const s = document.createElement("script");
-      s.id = ID_SCRIPT_INJETADO;
-      s.textContent = scriptContent;
-      (document.body || document.documentElement).appendChild(s);
-      console.log("✅ Script do S1 injetado com sucesso.");
+        const s = document.createElement("script");
+        s.id = ID_SCRIPT_INJETADO;
+        s.textContent = scriptContent;
+        (document.body || document.documentElement).appendChild(s);
+      } catch(e) {}
     }, codigoScript);
-
-  } catch (e) {
-    console.log("⚠️ Aviso ao injetar script do S1:", e.message);
-  }
+  } catch (e) {}
 }
 
 // ===================================
@@ -261,12 +264,9 @@ async function executar() {
   URL_S = `${CAMINHO_BASE}/S1.json`;
 
   console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
-  console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
-  // Diretório de perfil local dentro de assets/database na raiz do projeto
   const userDataDir = path.join(__dirname, "assets", "database");
 
-  // Garante que o diretório exista e remove trava anterior (SingletonLock) se existir
   try {
     if (!fs.existsSync(userDataDir)) {
       fs.mkdirSync(userDataDir, { recursive: true });
@@ -274,12 +274,9 @@ async function executar() {
       const lockFile = path.join(userDataDir, "SingletonLock");
       if (fs.existsSync(lockFile)) {
         fs.unlinkSync(lockFile);
-        console.log("🧹 Trava de sessão anterior (SingletonLock) removida com sucesso.");
       }
     }
-  } catch (e) {
-    console.log("⚠️ Aviso ao gerenciar diretório de perfil:", e.message);
-  }
+  } catch (e) {}
 
   const browser = await puppeteer.launch({
     headless: "new",
@@ -301,7 +298,6 @@ async function executar() {
   });
 
   const page = await browser.newPage();
-  
   await page.setBypassCSP(true);
   
   page.on('targetcreated', async (target) => {
@@ -310,83 +306,69 @@ async function executar() {
       if (newPage && newPage !== page) {
         const targetUrl = newPage.url();
         if (targetUrl && targetUrl !== 'about:blank') {
-          console.log(`🔀 Redirecionando aba nova para a página principal: ${targetUrl}`);
           await newPage.close();
-          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
         }
       }
     } catch (e) {}
   });
 
-  const larguraViewport = 1280;
-  const alturaViewport = 720;
-  await page.setViewport({ width: larguraViewport, height: alturaViewport });
+  await page.setViewport({ width: 1280, height: 720 });
 
   let ultimaURL = "https://google.com";
-
-  console.log(`🌐 Abrindo página inicial: ${ultimaURL}`);
-  
   try {
-    await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 60000 });
-  } catch (err) {
-    console.log("⚠️ Falha ao abrir página inicial:", err.message);
-  }
+    await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 30000 });
+  } catch (err) {}
 
   await injetarScriptDoFirebase(page);
-  console.log("✅ Sessão ativa + Firebase dinâmico conectado.");
+  console.log("✅ Sessão ativa + Firebase dinâmico conectado em tempo real.");
 
+  // Inicia o observador de cliques em tempo real absoluto (0ms)
   iniciarObservadorDeCliques(page);
 
+  // Loop principal super otimizado para URL, Digitação e Prints
   while (true) {
     try {
-      const urlAtualNoBrowser = page.url();
-      if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
-        ultimaURL = urlAtualNoBrowser;
-        await firebasePut(URL_U, ultimaURL);
-      }
+      if (!page.isClosed()) {
+        const urlAtualNoBrowser = page.url();
+        if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
+          ultimaURL = urlAtualNoBrowser;
+          firebasePut(URL_U, ultimaURL);
+        }
 
-      const rawNovaUrl = await firebaseGet(URL_U);
-      if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
-        const novaUrl = corrigirUrl(rawNovaUrl);
-
-        if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
-          console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
-          try {
-            await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-            ultimaURL = novaUrl;
-            await firebasePut(URL_U, "");
-            await injetarScriptDoFirebase(page);
-          } catch (navErr) {
-            console.error("❌ Erro de navegação:", navErr.message);
-            await firebasePut(URL_U, "");
+        const rawNovaUrl = await firebaseGet(URL_U);
+        if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
+          const novaUrl = corrigirUrl(rawNovaUrl);
+          if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
+            try {
+              await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+              ultimaURL = novaUrl;
+              firebasePut(URL_U, "");
+              injetarScriptDoFirebase(page);
+            } catch (navErr) {
+              firebasePut(URL_U, "");
+            }
           }
         }
-      }
 
-      const texto = await firebaseGet(URL_T);
-      if (typeof texto === "string" && texto.length > 0) {
-        await page.keyboard.type(texto);
-        console.log("⌨ Texto digitado:", texto);
-        await firebasePut(URL_T, "");
-      }
+        const texto = await firebaseGet(URL_T);
+        if (typeof texto === "string" && texto.length > 0) {
+          await page.keyboard.type(texto);
+          firebasePut(URL_T, "");
+        }
 
-      if (!page.isClosed()) {
-        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 50 });
-        const base64 = "data:image/jpeg;base64," + screenshotBuffer;
-        await firebasePut(URL_P, base64);
+        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 40 });
+        firebasePut(URL_P, "data:image/jpeg;base64," + screenshotBuffer);
       }
-
     } catch (err) {
-      console.error("Erro no loop:", err.message);
+      // Ignora qualquer erro no loop principal para evitar exceções
     }
 
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 200)); // Pequena pausa apenas para alívio de requisições de screenshot/URL
   }
 }
 
 // ===================================
 // INICIAR
 // ===================================
-executar().catch(err => {
-  console.error("❌ Erro fatal:", err.message);
-});
+executar().catch(() => {});
