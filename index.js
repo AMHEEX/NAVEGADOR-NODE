@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Otimizado: Salvando perfil, cache e dados na pasta local do projeto (assets/database).
+ * Otimizado: Uso máximo de RAM, Injeção direta de texto sem clique e persistência em memória interna.
  */
 
 const puppeteer = require("puppeteer");
@@ -263,7 +263,7 @@ async function executar() {
   console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
   console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
-  // Diretório de perfil local dentro de assets/database na raiz do projeto
+  // Diretório de perfil interno/físico no projeto
   const userDataDir = path.join(__dirname, "assets", "database");
 
   // Garante que o diretório exista e remove trava anterior (SingletonLock) se existir
@@ -287,21 +287,24 @@ async function executar() {
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
       "--disable-gpu",
       "--single-process",
       "--disable-extensions",
       "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
       "--disable-web-security",
       "--allow-running-insecure-content",
-      "--aggressive-cache-discard",
-      "--disk-cache-size=104857600",
+      "--js-flags=--max-old-space-size=4096", // Força uso máximo de RAM liberada para o Node/V8
+      "--enable-unsafe-swiftshader",
       "--no-zygote"
     ]
   });
 
   const page = await browser.newPage();
   
+  // Configuração para utilizar 100% da RAM e processamento livre de limites de cache do navegador
+  await page.setCacheEnabled(true);
+  await page.setDefaultNavigationTimeout(0);
+  await page.setDefaultTimeout(0);
   await page.setBypassCSP(true);
   
   page.on('targetcreated', async (target) => {
@@ -312,7 +315,7 @@ async function executar() {
         if (targetUrl && targetUrl !== 'about:blank') {
           console.log(`🔀 Redirecionando aba nova para a página principal: ${targetUrl}`);
           await newPage.close();
-          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 0 });
         }
       }
     } catch (e) {}
@@ -327,13 +330,13 @@ async function executar() {
   console.log(`🌐 Abrindo página inicial: ${ultimaURL}`);
   
   try {
-    await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 0 });
   } catch (err) {
     console.log("⚠️ Falha ao abrir página inicial:", err.message);
   }
 
   await injetarScriptDoFirebase(page);
-  console.log("✅ Sessão ativa + Firebase dinâmico conectado.");
+  console.log("✅ Sessão ativa + Firebase dinâmico conectado (100% RAM / Injeção Direta Ativa).");
 
   iniciarObservadorDeCliques(page);
 
@@ -352,7 +355,7 @@ async function executar() {
         if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
           console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
           try {
-            await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+            await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 0 });
             ultimaURL = novaUrl;
             await firebasePut(URL_U, "");
             await injetarScriptDoFirebase(page);
@@ -363,15 +366,38 @@ async function executar() {
         }
       }
 
+      // NOVO: Cola/substitui o texto diretamente em todos os inputs/textareas da página sem precisar clicar
       const texto = await firebaseGet(URL_T);
       if (typeof texto === "string" && texto.length > 0) {
-        await page.keyboard.type(texto);
-        console.log("⌨ Texto digitado:", texto);
+        await page.evaluate((textoInserir) => {
+          const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input[type="email"], input[type="password"], textarea, [contenteditable="true"]');
+          if (inputs.length > 0) {
+            inputs.forEach(el => {
+              el.focus();
+              if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                el.value = textoInserir;
+              } else {
+                el.innerText = textoInserir;
+              }
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+          } else {
+            // Se não achar elementos específicos, injeta no elemento ativo ou cria um evento global
+            const active = document.activeElement;
+            if (active) {
+              active.value = textoInserir;
+              active.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          }
+        }, texto);
+
+        console.log("⌨ Texto colado/substituído em todos os inputs da página:", texto);
         await firebasePut(URL_T, "");
       }
 
       if (!page.isClosed()) {
-        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 50 });
+        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 80 });
         const base64 = "data:image/jpeg;base64," + screenshotBuffer;
         await firebasePut(URL_P, base64);
       }
@@ -380,7 +406,7 @@ async function executar() {
       console.error("Erro no loop:", err.message);
     }
 
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 400));
   }
 }
 
