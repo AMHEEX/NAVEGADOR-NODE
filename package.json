@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node index.js",
-    "conect": "node web.js",
-    "bash": "bash index.sh"
+    "conect": "node web.js"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
