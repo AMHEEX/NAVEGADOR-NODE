@@ -39,7 +39,7 @@ function obterIpAtual() {
 // ===================================
 // CONFIGURAÇÃO DO SERVIDOR E FIREBASE
 // ===================================
-const BASE_SERVIDOR = "https://amheex-default-rtdb.firebaseio.com";
+const BASE_SERVIDOR = "https://server-exemplo-1-default-rtdb.firebaseio.com";
 
 let CAMINHO_BASE = "";
 let URL_CLICK, URL_U, URL_T, URL_P, URL_S;
