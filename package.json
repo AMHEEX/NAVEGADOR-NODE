@@ -2,8 +2,8 @@
   "name": "NAVEGADOR-NODE",
   "version": "1.0.0",
   "scripts": {
-    "start": "node index.js",
-    "new": "bash index.sh"
+    "start": "node index.js node web.js",
+    "bash": "bash index.sh"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
