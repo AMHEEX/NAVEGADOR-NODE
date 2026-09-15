@@ -1,388 +1,244 @@
 /**
- * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
- * Otimizado: Salvando perfil, cache e dados na pasta compartilhada da memória interna.
+ * NAVEGADOR HEADLESS
+ * 90% PRIORIDADE PARA CARREGAR A PÁGINA
+ * 10% PARA SCRIPT / CONTROLE JSON
  */
 
 const puppeteer = require("puppeteer-core");
-const https = require("https");
-const http = require("http");
-const path = require("path");
 const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 
 // ===================================
-// FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
+// DIRS
 // ===================================
-function obterIpAtual() {
-  return new Promise((resolve) => {
-    https.get("https://api.ipify.org?format=json", (res) => {
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(data);
-          if (json && json.ip) {
-            const ipFormatado = json.ip.replace(/\./g, "-");
-            resolve(ipFormatado);
-          } else {
-            resolve("instancia_fallback");
-          }
-        } catch (e) {
-          resolve("instancia_fallback");
-        }
-      });
-    }).on("error", () => {
-      resolve("instancia_fallback");
-    });
-  });
+const BASE_DIR = __dirname;
+const OUTPUT_DIR = path.join(BASE_DIR, "dados");
+const IMAGE_PATH = path.join(OUTPUT_DIR, "index.png");
+const TMP_IMAGE = path.join(OUTPUT_DIR, "tmp.png");
+const LOCAL_JSON = path.join(OUTPUT_DIR, "index.json");
+
+if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+// ===================================
+// JSON LOCAL
+// ===================================
+function fetchLocalJSON() {
+  try { return JSON.parse(fs.readFileSync(LOCAL_JSON, "utf8")); }
+  catch { return {}; }
+}
+
+function saveJSON(data) {
+  fs.writeFileSync(LOCAL_JSON, JSON.stringify(data, null, 2));
 }
 
 // ===================================
-// CONFIGURAÇÃO DO SERVIDOR E FIREBASE
+// HASH
 // ===================================
-const BASE_SERVIDOR = "https://servidor-de-exemplo-01-default-rtdb.firebaseio.com";
-
-let CAMINHO_BASE = "";
-let URL_CLICK, URL_U, URL_T, URL_P, URL_S;
-
-// ===================================
-// CORRETOR INTELIGENTE DE URL
-// ===================================
-function corrigirUrl(urlSuja) {
-  if (!urlSuja || typeof urlSuja !== "string") return "";
-  let url = urlSuja.trim();
-
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    url = "https://" + url;
-  }
-
+function hashFile(file) {
   try {
-    const parsed = new URL(url);
-    let host = parsed.hostname;
-
-    const correcoesDominios = {
-      "youtueb.com": "youtube.com",
-      "youtbe.com": "youtube.com",
-      "gogle.com": "google.com",
-      "goolge.com": "google.com",
-      "facebok.com": "facebook.com"
-    };
-
-    if (correcoesDominios[host]) {
-      parsed.hostname = correcoesDominios[host];
-    }
-
-    return parsed.toString();
-  } catch (e) {
-    return url;
+    const buff = fs.readFileSync(file);
+    return crypto.createHash("md5").update(buff).digest("hex");
+  } catch {
+    return null;
   }
 }
 
 // ===================================
-// FIREBASE HELPERS
+// CLIQUE ULTRA RÁPIDO — PRIORIDADE DE RENDERIZAÇÃO
 // ===================================
-function firebaseGet(url) {
-  return new Promise((resolve, reject) => {
-    const client = url.startsWith("https") ? https : http;
-    client.get(url + "?t=" + Date.now(), res => {
-      let data = "";
-      res.on("data", c => data += c);
-      res.on("end", () => {
-        try { resolve(JSON.parse(data)); }
-        catch { resolve(null); }
-      });
-    }).on("error", reject);
-  });
+async function clickAt(page, xRatio, yRatio) {
+  try { await page.mouse.up(); } catch {}
+
+  const vp = await page.viewport();
+
+  const pageSize = await page.evaluate(() => ({
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.scrollHeight
+  }));
+
+  const realX = Math.floor(xRatio * pageSize.width);
+  const realY = Math.floor(yRatio * pageSize.height);
+
+  await page.evaluate(y => window.scrollTo(0, y - 100), realY);
+
+  const visible = await page.evaluate(() => ({
+    top: window.scrollY,
+    height: window.innerHeight
+  }));
+
+  let clickX = realX;
+  let clickY = realY - visible.top;
+
+  clickX = Math.max(1, Math.min(clickX, vp.width - 1));
+  clickY = Math.max(1, Math.min(clickY, vp.height - 1));
+
+  // PRIORIDADE: entrega frame ao navegador
+  await page.evaluate(() => new Promise(res => requestAnimationFrame(res)));
+
+  await page.mouse.move(clickX, clickY);
+  await page.mouse.down();
+  await page.mouse.up();
+
+  console.log(`🖱 Clique → X=${clickX}px Y=${clickY}px`);
+
+  return await page.evaluate(([x, y]) => {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    const path = [];
+    let cur = el;
+    while (cur) {
+      path.push(cur.tagName);
+      cur = cur.parentElement;
+    }
+    return { path };
+  }, [clickX, clickY]);
 }
 
-function firebasePut(url, value) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(value);
-    const client = url.startsWith("https") ? https : http;
-    const req = client.request(url, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(data)
-      }
-    }, res => {
-      let d = "";
-      res.on("data", c => d += c);
-      res.on("end", () => resolve(d));
-    });
-    req.on("error", reject);
-    req.write(data);
-    req.end();
-  });
-}
-
 // ===================================
-// MÉTODO UNIFICADO DE CLIQUE (ÚNICA AÇÃO)
+// INSERIR TEXTO
 // ===================================
-async function processarCliqueUnico(page, x, y) {
-  const px = Math.max(0, Math.floor(x));
-  const py = Math.max(0, Math.floor(y));
+async function setText(page, elementInfo, text) {
+  if (!elementInfo) return;
 
-  try {
-    await page.mouse.move(px, py);
+  await page.evaluate((info, value) => {
+    let el = document.body;
+    const path = info.path.slice().reverse();
 
-    const acaoExecutada = await page.evaluate((xCoord, yCoord) => {
-      const elemento = document.elementFromPoint(xCoord, yCoord);
-      if (!elemento) return false;
-
-      const opts = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: xCoord,
-        clientY: yCoord,
-        screenX: xCoord,
-        screenY: yCoord
-      };
-
-      elemento.dispatchEvent(new MouseEvent('mouseover', opts));
-      elemento.dispatchEvent(new MouseEvent('mousedown', opts));
-      elemento.focus({ preventScroll: true });
-      elemento.dispatchEvent(new MouseEvent('mouseup', opts));
-      elemento.dispatchEvent(new MouseEvent('click', opts));
-
-      if (typeof TouchEvent !== 'undefined') {
-        try {
-          const touch = new Touch({
-            identifier: Date.now(),
-            target: elemento,
-            clientX: xCoord,
-            clientY: yCoord,
-            radiusX: 2.5,
-            radiusY: 2.5,
-            rotationAngle: 0,
-            force: 1
-          });
-          const touchOpts = { cancelable: true, bubbles: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] };
-          elemento.dispatchEvent(new TouchEvent('touchstart', touchOpts));
-          elemento.dispatchEvent(new TouchEvent('touchend', touchOpts));
-        } catch (e) {}
-      }
-
-      if (typeof elemento.click === 'function') {
-        elemento.click();
-      }
-
-      return true;
-    }, px, py);
-
-    if (!acaoExecutada) {
-      await page.mouse.down();
-      await page.mouse.up();
+    for (let tag of path) {
+      const found = el.querySelector(tag);
+      if (found) el = found;
     }
 
-    console.log(`🖱 Clique único unificado executado → X=${px} Y=${py}`);
-  } catch (e) {
-    console.log(`Erro no clique único X=${px} Y=${py}:`, e.message);
-  }
-}
-
-async function processarCliquesEmSequencia(page, listaCliques) {
-  if (!Array.isArray(listaCliques) || listaCliques.length === 0) return;
-
-  for (const item of listaCliques) {
-    if (!item || typeof item.x !== "number" || typeof item.y !== "number") continue;
-    await processarCliqueUnico(page, item.x, item.y);
-  }
-}
-
-// ===================================
-// LOOP EXCLUSIVO DE CLIQUE EM TEMPO REAL (10ms)
-// ===================================
-function iniciarObservadorDeCliques(page) {
-  let processando = false;
-
-  setInterval(async () => {
-    if (processando || !URL_CLICK || page.isClosed()) return;
-    processando = true;
-
-    try {
-      const dadosClick = await firebaseGet(URL_CLICK);
-      if (dadosClick) {
-        const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
-        if (listaCliques.length > 0) {
-          await firebasePut(URL_CLICK, null);
-          await processarCliquesEmSequencia(page, listaCliques);
-        }
-      }
-    } catch (err) {
-      // Ignora erros pontuais
-    } finally {
-      processando = false;
+    if (el && "value" in el) {
+      el.value = value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
     }
-  }, 10);
+  }, elementInfo, text);
+
+  console.log("⌨ Texto inserido:", text);
 }
 
 // ===================================
-// INJEÇÃO SEGURA DE SCRIPT VIA CONTEÚDO (S1)
+// SCREENSHOT INTELIGENTE (ULTRA LEVE)
 // ===================================
-async function injetarScriptDoFirebase(page) {
-  try {
-    const codigoScript = await firebaseGet(URL_S);
-    
-    if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) {
-      return;
-    }
+async function screenshotSmart(page) {
+  await page.screenshot({ path: TMP_IMAGE, fullPage: true });
 
-    await page.evaluate((scriptContent) => {
-      const ID_SCRIPT_INJETADO = "__custom_firebase_script__";
-      let antigo = document.getElementById(ID_SCRIPT_INJETADO);
-      if (antigo) antigo.remove();
+  const oldHash = hashFile(IMAGE_PATH);
+  const newHash = hashFile(TMP_IMAGE);
 
-      const s = document.createElement("script");
-      s.id = ID_SCRIPT_INJETADO;
-      s.textContent = scriptContent;
-      (document.body || document.documentElement).appendChild(s);
-      console.log("✅ Script do S1 injetado com sucesso.");
-    }, codigoScript);
+  if (oldHash === newHash) return fs.unlinkSync(TMP_IMAGE);
 
-  } catch (e) {
-    console.log("⚠️ Aviso ao injetar script do S1:", e.message);
-  }
+  fs.renameSync(TMP_IMAGE, IMAGE_PATH);
+  console.log("📸 Screenshot atualizado.");
 }
 
 // ===================================
-// PRINCIPAL
+// PRINCIPAL — 90% PRIORIDADE PARA A PÁGINA
 // ===================================
-async function executar() {
-  console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
-  const ipAtual = await obterIpAtual();
-  
-  CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${ipAtual}`;
-
-  URL_CLICK = `${CAMINHO_BASE}/CLICK.json`;
-  URL_U = `${CAMINHO_BASE}/U1.json`;
-  URL_T = `${CAMINHO_BASE}/T1.json`;
-  URL_P = `${CAMINHO_BASE}/P1.json`;
-  URL_S = `${CAMINHO_BASE}/S1.json`;
-
-  console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
-  console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
-
-  const chromiumPath = "/data/data/com.termux/files/usr/bin/chromium-browser";
-  
-  // Diretório na memória interna/compartilhada configurado pelo usuário
-  const userDataDir = "/data/data/com.termux/files/home/NAVEGADOR-NODE/assets/database";
-
-  // Garante que o diretório exista antes de iniciar o navegador
-  try {
-    if (!fs.existsSync(userDataDir)) {
-      fs.mkdirSync(userDataDir, { recursive: true });
-    }
-  } catch (e) {
-    console.log("⚠️ Aviso ao criar diretório de perfil:", e.message);
-  }
+async function executar(siteUrl) {
+  // Caminho dinâmico compatível com o Termux ($PREFIX/bin/chromium)
+  const termuxPrefix = process.env.PREFIX || "/data/data/com.termux/files/usr";
+  const chromiumPath = process.env.CHROMIUM_PATH || path.join(termuxPrefix, "bin", "chromium");
 
   const browser = await puppeteer.launch({
     headless: true,
     executablePath: chromiumPath,
-    userDataDir: userDataDir,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
       "--disable-gpu",
-      "--single-process",
-      "--disable-extensions",
-      "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
       "--disable-web-security",
-      "--allow-running-insecure-content",
-      "--aggressive-cache-discard",
-      "--disk-cache-size=104857600"
+      "--disable-extensions",
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-renderer-backgrounding",
+      "--disable-popup-blocking",
+      "--disable-features=IsolateOrigins,site-per-process",
+      "--disable-features=ScriptStreaming"
     ]
   });
 
   const page = await browser.newPage();
-  
-  await page.setBypassCSP(true);
-  
-  page.on('targetcreated', async (target) => {
-    try {
-      const newPage = await target.page();
-      if (newPage && newPage !== page) {
-        const targetUrl = newPage.url();
-        if (targetUrl && targetUrl !== 'about:blank') {
-          console.log(`🔀 Redirecionando aba nova para a página principal: ${targetUrl}`);
-          await newPage.close();
-          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-        }
-      }
-    } catch (e) {}
+  await page.setViewport({ width: 1366, height: 768 });
+
+  // == 90% prioritário (apenas DOM carregado)
+  console.log("🌐 Carregando página rápido:", siteUrl);
+  await page.goto(siteUrl, { waitUntil: "domcontentloaded" });
+
+  // BLOQUEIA lixo → acelera 4x
+  await page.setRequestInterception(true);
+  page.on("request", req => {
+    const type = req.resourceType();
+
+    if (["image", "media", "font", "stylesheet", "websocket"].includes(type))
+      return req.abort();
+
+    if (/analytics|ads|pixel|tracker/i.test(req.url()))
+      return req.abort();
+
+    req.continue();
   });
 
-  const larguraViewport = 1280;
-  const alturaViewport = 720;
-  await page.setViewport({ width: larguraViewport, height: alturaViewport });
+  console.log("🚀 Página pronta para ação (prioridade total).");
 
-  let ultimaURL = "https://google.com";
-
-  console.log(`🌐 Abrindo página inicial: ${ultimaURL}`);
-  
-  try {
-    await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 60000 });
-  } catch (err) {
-    console.log("⚠️ Falha ao abrir página inicial:", err.message);
-  }
-
-  await injetarScriptDoFirebase(page);
-  console.log("✅ Sessão ativa + Firebase dinâmico conectado.");
-
-  iniciarObservadorDeCliques(page);
+  let ultimoJSON = fetchLocalJSON();
+  let ultimaURL = siteUrl;
+  let lastClickInfo = null;
 
   while (true) {
-    try {
-      const urlAtualNoBrowser = page.url();
-      if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
-        ultimaURL = urlAtualNoBrowser;
-        await firebasePut(URL_U, ultimaURL);
-      }
+    const novoJSON = fetchLocalJSON();
 
-      const rawNovaUrl = await firebaseGet(URL_U);
-      if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
-        const novaUrl = corrigirUrl(rawNovaUrl);
+    // 🌐 MUDANÇA DE SITE RÁPIDA
+    if (novoJSON.site && novoJSON.site !== ultimaURL) {
+      const newURL = novoJSON.site.startsWith("http")
+        ? novoJSON.site
+        : "https://" + novoJSON.site;
 
-        if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
-          console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
-          try {
-            await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-            ultimaURL = novaUrl;
-            await firebasePut(URL_U, "");
-            await injetarScriptDoFirebase(page);
-          } catch (navErr) {
-            console.error("❌ Erro de navegação:", navErr.message);
-            await firebasePut(URL_U, "");
-          }
-        }
-      }
+      console.log("🔀 Mudando para:", newURL);
 
-      const texto = await firebaseGet(URL_T);
-      if (typeof texto === "string" && texto.length > 0) {
-        await page.keyboard.type(texto);
-        console.log("⌨ Texto digitado:", texto);
-        await firebasePut(URL_T, "");
-      }
-
-      if (!page.isClosed()) {
-        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 50 });
-        const base64 = "data:image/jpeg;base64," + screenshotBuffer;
-        await firebasePut(URL_P, base64);
-      }
-
-    } catch (err) {
-      console.error("Erro no loop:", err.message);
+      await page.goto(newURL, { waitUntil: "domcontentloaded" });
+      ultimaURL = newURL;
     }
 
-    await new Promise(r => setTimeout(r, 800));
+    // 🖱 CLIQUE ULTRA PRIORITÁRIO
+    if (novoJSON.click && (
+      !ultimoJSON.click ||
+      novoJSON.click.x !== ultimoJSON.click.x ||
+      novoJSON.click.y !== ultimoJSON.click.y
+    )) {
+      lastClickInfo = await clickAt(page, novoJSON.click.x, novoJSON.click.y);
+      delete novoJSON.click;
+      saveJSON(novoJSON);
+    }
+
+    // ⌨ TEXTO
+    if (novoJSON.text) {
+      await setText(page, lastClickInfo, novoJSON.text);
+      delete novoJSON.text;
+      saveJSON(novoJSON);
+    }
+
+    // 📸 SCREENSHOT LEVE
+    await screenshotSmart(page);
+
+    ultimoJSON = novoJSON;
+
+    // LOOP ULTRA RÁPIDO — 10% PRIORIDADE PARA SCRIPT
+    await new Promise(r => setTimeout(r, 5));
   }
 }
 
 // ===================================
 // INICIAR
 // ===================================
-executar().catch(err => {
-  console.error("❌ Erro fatal:", err.message);
-});
+(async () => {
+  const json = fetchLocalJSON();
+  let url = json.site;
+
+  if (!url) return console.log("❌ JSON sem campo 'site'.");
+  if (!url.startsWith("http")) url = "https://" + url;
+
+  await executar(url);
+})();
