@@ -1,0 +1,562 @@
+<?php
+$baseDir  = __DIR__;
+$metaFile = $baseDir . "/dados/index.json";
+$imageFile = $baseDir . "/dados/index.png";
+
+if (!is_dir($baseDir . "/dados")) mkdir($baseDir . "/dados", 0777, true);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents("php://input"), true) ?? [];
+    $jsonAtual = file_exists($metaFile) ? json_decode(file_get_contents($metaFile), true) : [];
+
+    if (isset($input['click'])) {
+        $jsonAtual['click'] = [
+            'x' => (float)$input['click']['x'],
+            'y' => (float)$input['click']['y']
+        ];
+    }
+    if (isset($input['text'])) {
+        $jsonAtual['text'] = $input['text'];
+    }
+    if (isset($input['site'])) {
+        $jsonAtual['site'] = $input['site'];
+    }
+    if (isset($input['script'])) {
+        $jsonAtual['script'] = $input['script'];
+    }
+
+    $jsonAtual['time'] = time();
+    file_put_contents($metaFile, json_encode($jsonAtual, JSON_PRETTY_PRINT));
+    echo json_encode(["status" => "ok", "time" => $jsonAtual['time']]);
+    exit;
+}
+
+$json = file_exists($metaFile) ? json_decode(file_get_contents($metaFile), true) : [];
+$click = $json['click'] ?? null;
+$text  = $json['text'] ?? "";
+$site  = $json['site'] ?? "";
+$script = $json['script'] ?? "";
+$temImagem = file_exists($imageFile);
+?>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Control - NAVEGADOR NODE</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            touch-action: none;
+        }
+
+        :root {
+            --ax1-primary: #00ffcc;
+            --ax1-primary-rgb: 0, 255, 204;
+            --ax1-primary-dark: #008866;
+        }
+
+        .container-tela {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000;
+        }
+
+        #telaRemota {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            cursor: crosshair;
+            display: block;
+            background-color: #111;
+            transition: opacity 0.2s;
+        }
+
+        #ax1-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(3px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2147483648;
+            padding: 20px;
+        }
+
+        .ax1-modal-box {
+            width: 100%;
+            max-width: 320px;
+            background: rgba(8, 14, 24, 0.98);
+            border: 1px solid var(--ax1-primary);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.9), 0 0 15px rgba(var(--ax1-primary-rgb), 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            animation: modalPop 0.2s ease-out;
+        }
+
+        @keyframes modalPop {
+            0% { transform: scale(0.9); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .ax1-modal-title {
+            font-size: 15px;
+            font-weight: bold;
+            color: #ffffff;
+            text-align: center;
+            letter-spacing: 0.5px;
+        }
+
+        .ax1-modal-input {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(var(--ax1-primary-rgb), 0.4);
+            border-radius: 6px;
+            color: #ffffff;
+            font-size: 13px;
+            outline: none;
+            transition: 0.2s;
+        }
+        .ax1-modal-input:focus {
+            border-color: var(--ax1-primary);
+            box-shadow: 0 0 8px rgba(var(--ax1-primary-rgb), 0.4);
+        }
+
+        .ax1-modal-textarea {
+            width: 100%;
+            height: 100px;
+            padding: 10px 12px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(var(--ax1-primary-rgb), 0.4);
+            border-radius: 6px;
+            color: #ffffff;
+            font-size: 12px;
+            font-family: monospace;
+            outline: none;
+            resize: none;
+            transition: 0.2s;
+        }
+        .ax1-modal-textarea:focus {
+            border-color: var(--ax1-primary);
+            box-shadow: 0 0 8px rgba(var(--ax1-primary-rgb), 0.4);
+        }
+
+        .ax1-modal-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .ax1-modal-btn {
+            flex: 1;
+            padding: 9px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+            text-align: center;
+        }
+
+        .ax1-modal-btn.cancel {
+            background: rgba(255, 255, 255, 0.05);
+            color: #a0aec0;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .ax1-modal-btn.confirm {
+            background: var(--ax1-primary);
+            color: #050a12;
+            border: 1px solid var(--ax1-primary);
+            box-shadow: 0 0 10px rgba(var(--ax1-primary-rgb), 0.4);
+        }
+
+        #arenax1-floating {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            z-index: 2147483647;
+            font-family: Arial, sans-serif;
+            user-select: none;
+            touch-action: none;
+            will-change: transform, left, top;
+        }
+        #arenax1-icon {
+            width: 52px;
+            height: 52px;
+            object-fit: cover;
+            display: block;
+            cursor: pointer;
+            border: 2px solid var(--ax1-primary);
+            border-radius: 10px;
+            background: #1e1e1e;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+            filter: drop-shadow(0 0 8px rgba(var(--ax1-primary-rgb), .8));
+        }
+
+        #arenax1-menu {
+            width: 310px;
+            display: none;
+            flex-direction: column;
+            background: rgba(5,10,18,.98);
+            border: 1px solid var(--ax1-primary);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 10px 35px rgba(0,0,0,.8);
+        }
+        #arenax1-header {
+            height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--ax1-primary), var(--ax1-primary-dark));
+            color: white;
+            font-size: 15px;
+            font-weight: bold;
+            position: relative;
+        }
+        #arenax1-header img {
+            position: absolute;
+            left: 9px;
+            width: 36px;
+            height: 36px;
+            object-fit: contain;
+            cursor: pointer;
+            border-radius: 6px;
+        }
+        #arenax1-content {
+            max-height: 350px;
+            overflow-y: auto;
+            box-sizing: border-box;
+            padding: 5px;
+        }
+        .arenax1-item {
+            padding: 8px;
+            border-bottom: 1px solid rgba(var(--ax1-primary-rgb), .15);
+            box-sizing: border-box;
+        }
+        .arenax1-button {
+            width: 100%;
+            min-height: 40px;
+            padding: 8px;
+            background: rgba(var(--ax1-primary-rgb), .1);
+            color: white;
+            border: 1px solid var(--ax1-primary);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            transition: 0.2s;
+            box-sizing: border-box;
+            text-align: left;
+        }
+        #arenax1-footer {
+            display: flex;
+            gap: 5px;
+            padding: 7px;
+            background: #000a12;
+            border-top: 1px solid var(--ax1-primary);
+            box-sizing: border-box;
+        }
+        .arenax1-footer-button {
+            flex: 1;
+            height: 38px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+            background: #000;
+            color: white;
+            border: 1px solid var(--ax1-primary);
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ax1-modal-overlay">
+        <div class="ax1-modal-box">
+            <div class="ax1-modal-title" id="ax1ModalTitle">Título</div>
+            <div id="ax1ModalBody"></div>
+            <div class="ax1-modal-buttons">
+                <button class="ax1-modal-btn cancel" id="ax1ModalCancel">Cancelar</button>
+                <button class="ax1-modal-btn confirm" id="ax1ModalConfirm">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="arenax1-floating">
+        <img id="arenax1-icon" src="https://amheex.web.app/icon.jpg" alt="Logo" onerror="this.style.display='none'">
+        <div id="arenax1-menu">
+            <div id="arenax1-header">
+                <img src="https://amheex.web.app/icon.jpg" alt="Logo" onerror="this.style.display='none'">
+                <span id="arenax1-title-text">NAVEGADOR NODE</span>
+            </div>
+            <div id="arenax1-content">
+                <div class="arenax1-item"><button class="arenax1-button" id="btnMudarUrl">🌐 Digitar / Mudar URL</button></div>
+                <div class="arenax1-item"><button class="arenax1-button" id="btnEnviarTexto">⌨️ Digitar Texto no Input</button></div>
+                <div class="arenax1-item"><button class="arenax1-button" id="btnEnviarScript">📜 Injetar Script JS</button></div>
+                <div class="arenax1-item"><button class="arenax1-button" id="btnPaisagem">🔄 Virar Tela</button></div>
+                <div class="arenax1-item"><button class="arenax1-button" id="btnTelaCheia">🖥️ Alternar Tela Cheia</button></div>
+            </div>
+            <div id="arenax1-footer">
+                <button class="arenax1-footer-button" id="btnCloseMenu">MINIMIZE</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container-tela">
+        <?php if (!$temImagem): ?>
+            <div style="color: #a0aec0; font-size: 14px;">Nenhuma imagem disponível ainda...</div>
+        <?php else: ?>
+            <img id="telaRemota" src="dados/index.png?t=<?= time() ?>" alt="Aguardando print...">
+        <?php endif; ?>
+    </div>
+
+    <script>
+        const imgTela = document.getElementById("telaRemota");
+        const menuFlutuante = document.getElementById("arenax1-menu");
+        const iconFlutuante = document.getElementById("arenax1-icon");
+        const floatingContainer = document.getElementById("arenax1-floating");
+
+        const modalOverlay = document.getElementById("ax1-modal-overlay");
+        const modalTitle = document.getElementById("ax1ModalTitle");
+        const modalBody = document.getElementById("ax1ModalBody");
+        const modalCancel = document.getElementById("ax1ModalCancel");
+        const modalConfirm = document.getElementById("ax1ModalConfirm");
+
+        let clickAtual = <?= json_encode($click) ?>;
+        let textoAtual = <?= json_encode($text) ?>;
+        let siteAtual = <?= json_encode($site) ?>;
+        let scriptAtual = <?= json_encode($script) ?>;
+
+        async function enviarDados(extras = {}) {
+            const payload = Object.assign({
+                click: clickAtual,
+                text: textoAtual,
+                site: siteAtual,
+                script: scriptAtual
+            }, extras);
+
+            try {
+                const res = await fetch("", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (imgTela) {
+                    imgTela.src = "dados/index.png?t=" + Date.now();
+                }
+            } catch (e) {}
+        }
+
+        function mostrarModalInput({ titulo, valorInicial = "", tipo = "text", placeholder = "", aoConfirmar }) {
+            modalTitle.textContent = titulo;
+            modalBody.innerHTML = "";
+
+            let inputEl = tipo === "textarea" ? document.createElement("textarea") : document.createElement("input");
+            inputEl.className = tipo === "textarea" ? "ax1-modal-textarea" : "ax1-modal-input";
+            if (tipo !== "textarea") inputEl.type = "text";
+            
+            inputEl.value = valorInicial;
+            if (placeholder) inputEl.placeholder = placeholder;
+            modalBody.appendChild(inputEl);
+
+            modalOverlay.style.display = "flex";
+            setTimeout(() => inputEl.focus(), 50);
+
+            const novoCancelar = modalCancel.cloneNode(true);
+            const novoConfirmar = modalConfirm.cloneNode(true);
+            modalCancel.parentNode.replaceChild(novoCancelar, modalCancel);
+            modalConfirm.parentNode.replaceChild(novoConfirmar, modalConfirm);
+
+            novoCancelar.onclick = () => modalOverlay.style.display = "none";
+            novoConfirmar.onclick = () => {
+                const val = inputEl.value;
+                modalOverlay.style.display = "none";
+                if (aoConfirmar) aoConfirmar(val);
+            };
+
+            inputEl.onkeydown = (e) => {
+                if (e.key === "Enter" && tipo !== "textarea") novoConfirmar.click();
+            };
+        }
+
+        let dragging = false, startX = 0, startY = 0, moved = false, rafId = null;
+
+        iconFlutuante.onclick = () => {
+            if (moved) { moved = false; return; }
+            menuFlutuante.style.display = "flex";
+            iconFlutuante.style.display = "none";
+        };
+
+        document.getElementById("btnCloseMenu").onclick = () => {
+            menuFlutuante.style.display = "none";
+            iconFlutuante.style.display = "block";
+        };
+
+        floatingContainer.addEventListener("pointerdown", (e) => {
+            if (["INPUT", "LABEL", "BUTTON", "SELECT", "TEXTAREA"].includes(e.target.tagName)) return;
+            if (e.target.closest("#arenax1-menu") && menuFlutuante.style.display === "flex") return;
+            
+            dragging = true;
+            moved = false;
+            
+            const rect = floatingContainer.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+            
+            floatingContainer.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+
+        floatingContainer.addEventListener("pointermove", (e) => {
+            if (!dragging) return;
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                let x = e.clientX - startX;
+                let y = e.clientY - startY;
+
+                const maxX = window.innerWidth - floatingContainer.offsetWidth;
+                const maxY = window.innerHeight - floatingContainer.offsetHeight;
+
+                x = Math.max(0, Math.min(maxX, x));
+                y = Math.max(0, Math.min(maxY, y));
+
+                if (Math.abs(x - floatingContainer.offsetLeft) > 2 || Math.abs(y - floatingContainer.offsetTop) > 2) {
+                    moved = true;
+                }
+
+                floatingContainer.style.left = x + "px";
+                floatingContainer.style.top = y + "px";
+                floatingContainer.style.right = "auto";
+                floatingContainer.style.bottom = "auto";
+            });
+        });
+
+        floatingContainer.addEventListener("pointerup", (e) => {
+            dragging = false;
+            if (rafId) cancelAnimationFrame(rafId);
+            try { floatingContainer.releasePointerCapture(e.pointerId); } catch (err) {}
+        });
+
+        if (imgTela) {
+            imgTela.addEventListener("click", async (event) => {
+                if (!imgTela.naturalWidth || !imgTela.naturalHeight) return;
+
+                const rect = imgTela.getBoundingClientRect();
+                const xRelativo = event.clientX - rect.left;
+                const yRelativo = event.clientY - rect.top;
+
+                if (xRelativo < 0 || xRelativo > rect.width || yRelativo < 0 || yRelativo > rect.height) return;
+
+                clickAtual = {
+                    x: Number((xRelativo / rect.width).toFixed(4)),
+                    y: Number((yRelativo / rect.height).toFixed(4))
+                };
+
+                await enviarDados();
+            });
+        }
+
+        document.getElementById("btnMudarUrl").addEventListener("click", () => {
+            menuFlutuante.style.display = "none";
+            iconFlutuante.style.display = "block";
+
+            mostrarModalInput({
+                titulo: "🌐 Digitar / Mudar URL",
+                valorInicial: siteAtual,
+                placeholder: "ex: https://google.com",
+                aoConfirmar: async (novaUrl) => {
+                    if (!novaUrl || !novaUrl.trim()) return;
+                    if (!novaUrl.startsWith("http")) novaUrl = "https://" + novaUrl;
+                    siteAtual = novaUrl;
+                    await enviarDados();
+                }
+            });
+        });
+
+        document.getElementById("btnEnviarTexto").addEventListener("click", () => {
+            menuFlutuante.style.display = "none";
+            iconFlutuante.style.display = "block";
+
+            mostrarModalInput({
+                titulo: "⌨️ Digitar Texto no Input",
+                valorInicial: textoAtual,
+                placeholder: "Digite o texto...",
+                aoConfirmar: async (texto) => {
+                    if (texto === null) return;
+                    textoAtual = texto;
+                    await enviarDados();
+                }
+            });
+        });
+
+        document.getElementById("btnEnviarScript").addEventListener("click", () => {
+            menuFlutuante.style.display = "none";
+            iconFlutuante.style.display = "block";
+
+            mostrarModalInput({
+                titulo: "📜 Injetar Script JS",
+                valorInicial: scriptAtual,
+                tipo: "textarea",
+                placeholder: "Cole o código JavaScript...",
+                aoConfirmar: async (codigoScript) => {
+                    if (!codigoScript || !codigoScript.trim()) return;
+                    scriptAtual = codigoScript;
+                    await enviarDados();
+                }
+            });
+        });
+
+        document.getElementById("btnPaisagem").addEventListener("click", async () => {
+            menuFlutuante.style.display = "none";
+            iconFlutuante.style.display = "block";
+            try {
+                if (screen.orientation && screen.orientation.lock) await screen.orientation.lock("landscape");
+            } catch (e) {}
+        });
+
+        document.getElementById("btnTelaCheia").addEventListener("click", () => {
+            menuFlutuante.style.display = "none";
+            iconFlutuante.style.display = "block";
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen?.();
+            }
+        });
+
+        // Atualização automática da imagem a cada 2 segundos
+        setInterval(() => {
+            if (imgTela) {
+                imgTela.src = "dados/index.png?t=" + Date.now();
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
