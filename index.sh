@@ -25,13 +25,3 @@ which chromium-browser
 chromium-browser --version
 
 # ========================================================
-
-rm -rf ~/storage/shared
-ln -s /storage/emulated/0 ~/storage/shared
-cd ~/storage/shared
-ls -la
-
-
-cd /data/data/com.termux/files/home/storage/shared/NAVEGADOR-NODE
-
-# ========================================================
