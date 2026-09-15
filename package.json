@@ -2,7 +2,7 @@
   "name": "NAVEGADOR-NODE",
   "version": "1.0.0",
   "scripts": {
-    "start": "node index.js node web.js"
+    "start": "node index.js && node web.js"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
