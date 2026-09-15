@@ -1,6 +1,6 @@
 /**
  * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Atualizado com leitura, colagem automática em inputs e limpeza do arquivo de texto
+ * Otimizado: Salvando perfil, cache e dados na pasta local do projeto (assets/database).
  */
 
 const puppeteer = require("puppeteer");
@@ -8,154 +8,41 @@ const https = require("https");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
-const crypto = require("crypto");
 
 // ===================================
-// CONFIGURAÇÃO DA API STORAGE
+// FUNÇÃO PARA OBTER O IP ATUAL DA INTERNET
 // ===================================
-const API_STORAGE_BASE = "https://api-storageamheex.onrender.com";
-
-function urlLeitura(caminhoRelativo) {
-  const limpo = caminhoRelativo.startsWith("/") ? caminhoRelativo.slice(1) : caminhoRelativo;
-  return `${API_STORAGE_BASE}/X/${limpo}`;
-}
-
-function urlDownload(caminhoRelativo) {
-  const limpo = caminhoRelativo.startsWith("/") ? caminhoRelativo.slice(1) : caminhoRelativo;
-  return `${API_STORAGE_BASE}/${limpo}`;
-}
-
-// ===================================
-// GERADOR DE ID ÚNICO PARA A INSTÂNCIA
-// ===================================
-const ID_INSTANCIA = "node_" + crypto.randomBytes(4).toString("hex");
-const DATA_HORA_INICIO = new Date().toISOString();
-
-// ===================================
-// VARIÁVEIS DE CAMINHO DA API
-// ===================================
-let BASE_API = "";
-let URL_IPS_INDEX = "";
-let URL_IPS_INDEX_ESCRITA = "";
-let URL_IMG_TXT = ""; 
-let URL_REDIRECT_TXT = "";
-let URL_Y_LEITURA = "";
-let URL_X_LEITURA = "";
-let URL_Y_ESCRITA = "";
-let URL_X_ESCRITA = "";
-let URL_TEXT_INPUT_LEITURA = "";
-let URL_TEXT_INPUT_ESCRITA = "";
-
-// ===================================
-// STORAGE API HELPERS (HTTP/HTTPS)
-// ===================================
-function apiGet(url) {
-  return new Promise((resolve, reject) => {
-    const client = url.startsWith("https") ? https : http;
-    client.get(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), res => {
-      let data = "";
-      res.on("data", c => data += c);
-      res.on("end", () => {
-        try { resolve(JSON.parse(data)); }
-        catch { resolve(data); }
-      });
-    }).on("error", reject);
-  });
-}
-
-function apiPut(url, value) {
-  return new Promise((resolve, reject) => {
-    let payload;
-    let contentType = "text/plain";
-
-    if (Buffer.isBuffer(value)) {
-      payload = value;
-      contentType = "application/octet-stream";
-    } else if (typeof value === "string") {
-      payload = value;
-    } else {
-      payload = JSON.stringify(value);
-      contentType = "application/json";
-    }
-
-    const client = url.startsWith("https") ? https : http;
-    const req = client.request(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": contentType,
-        "Content-Length": Buffer.isBuffer(payload) ? payload.length : Buffer.byteLength(payload)
-      }
-    }, res => {
-      let d = "";
-      res.on("data", c => d += c);
-      res.on("end", () => resolve(d));
-    });
-
-    req.on("error", reject);
-    req.write(payload);
-    req.end();
-  });
-}
-
-// ===================================
-// BUSCAR IP PÚBLICO ATUAL
-// ===================================
-function obterIpPublico() {
+function obterIpAtual() {
   return new Promise((resolve) => {
     https.get("https://api.ipify.org?format=json", (res) => {
       let data = "";
       res.on("data", chunk => data += chunk);
       res.on("end", () => {
         try {
-          const parsed = JSON.parse(data);
-          resolve(parsed.ip || "IP_DESCONHECIDO");
-        } catch {
-          resolve("IP_DESCONHECIDO");
+          const json = JSON.parse(data);
+          if (json && json.ip) {
+            const ipFormatado = json.ip.replace(/\./g, "-");
+            resolve(ipFormatado);
+          } else {
+            resolve("instancia_fallback");
+          }
+        } catch (e) {
+          resolve("instancia_fallback");
         }
       });
-    }).on("error", () => resolve("IP_DESCONHECIDO"));
+    }).on("error", () => {
+      resolve("instancia_fallback");
+    });
   });
 }
 
 // ===================================
-// GERENCIAMENTO NO INDEX.JSON
+// CONFIGURAÇÃO DO SERVIDOR E FIREBASE
 // ===================================
-async function gerenciarIpNoIndexJson() {
-  try {
-    let listaInstancias = [];
-    
-    try {
-      const conteudoAtual = await apiGet(URL_IPS_INDEX);
-      if (Array.isArray(conteudoAtual)) {
-        listaInstancias = conteudoAtual;
-      } else if (typeof conteudoAtual === "object" && conteudoAtual !== null) {
-        listaInstancias = Object.values(conteudoAtual);
-      }
-    } catch (e) {
-      listaInstancias = [];
-    }
+const BASE_SERVIDOR = "https://amheex-default-rtdb.firebaseio.com";
 
-    listaInstancias = listaInstancias.filter(i => (typeof i === "string" ? i !== ID_INSTANCIA : i.id !== ID_INSTANCIA));
-
-    const ipPublicoAtual = await obterIpPublico();
-
-    const agora = Date.now();
-    const novaInstancia = {
-      id: ID_INSTANCIA,
-      dataHoraInicio: DATA_HORA_INICIO,
-      dataHoraAtual: new Date(agora).toISOString(),
-      tempoAtual: agora,
-      expiraEm: agora + 30000,
-      ipPublico: ipPublicoAtual
-    };
-
-    listaInstancias.push(novaInstancia);
-
-    await apiPut(URL_IPS_INDEX_ESCRITA, JSON.stringify(listaInstancias, null, 2));
-  } catch (err) {
-    console.error("❌ Erro ao atualizar index.json:", err.message);
-  }
-}
+let CAMINHO_BASE = "";
+let URL_CLICK, URL_U, URL_T, URL_P, URL_S;
 
 // ===================================
 // CORRETOR INTELIGENTE DE URL
@@ -191,7 +78,45 @@ function corrigirUrl(urlSuja) {
 }
 
 // ===================================
-// MÉTODO DE CLIQUE (COORDENADAS X, Y)
+// FIREBASE HELPERS
+// ===================================
+function firebaseGet(url) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith("https") ? https : http;
+    client.get(url + "?t=" + Date.now(), res => {
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve(null); }
+      });
+    }).on("error", reject);
+  });
+}
+
+function firebasePut(url, value) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(value);
+    const client = url.startsWith("https") ? https : http;
+    const req = client.request(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(data)
+      }
+    }, res => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => resolve(d));
+    });
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+// ===================================
+// MÉTODO UNIFICADO DE CLIQUE (ÚNICA AÇÃO)
 // ===================================
 async function processarCliqueUnico(page, x, y) {
   const px = Math.max(0, Math.floor(x));
@@ -200,9 +125,9 @@ async function processarCliqueUnico(page, x, y) {
   try {
     await page.mouse.move(px, py);
 
-    await page.evaluate((xCoord, yCoord) => {
+    const acaoExecutada = await page.evaluate((xCoord, yCoord) => {
       const elemento = document.elementFromPoint(xCoord, yCoord);
-      if (!elemento) return;
+      if (!elemento) return false;
 
       const opts = {
         bubbles: true,
@@ -220,144 +145,128 @@ async function processarCliqueUnico(page, x, y) {
       elemento.dispatchEvent(new MouseEvent('mouseup', opts));
       elemento.dispatchEvent(new MouseEvent('click', opts));
 
+      if (typeof TouchEvent !== 'undefined') {
+        try {
+          const touch = new Touch({
+            identifier: Date.now(),
+            target: elemento,
+            clientX: xCoord,
+            clientY: yCoord,
+            radiusX: 2.5,
+            radiusY: 2.5,
+            rotationAngle: 0,
+            force: 1
+          });
+          const touchOpts = { cancelable: true, bubbles: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] };
+          elemento.dispatchEvent(new TouchEvent('touchstart', touchOpts));
+          elemento.dispatchEvent(new TouchEvent('touchend', touchOpts));
+        } catch (e) {}
+      }
+
       if (typeof elemento.click === 'function') {
         elemento.click();
       }
+
+      return true;
     }, px, py);
 
-    console.log(`🖱 Clique executado → X=${px} Y=${py}`);
+    if (!acaoExecutada) {
+      await page.mouse.down();
+      await page.mouse.up();
+    }
+
+    console.log(`🖱 Clique único unificado executado → X=${px} Y=${py}`);
   } catch (e) {
-    console.log(`Erro no clique X=${px} Y=${py}:`, e.message);
+    console.log(`Erro no clique único X=${px} Y=${py}:`, e.message);
+  }
+}
+
+async function processarCliquesEmSequencia(page, listaCliques) {
+  if (!Array.isArray(listaCliques) || listaCliques.length === 0) return;
+
+  for (const item of listaCliques) {
+    if (!item || typeof item.x !== "number" || typeof item.y !== "number") continue;
+    await processarCliqueUnico(page, item.x, item.y);
   }
 }
 
 // ===================================
-// OBSERVADOR DE COORDENADAS EM TEMPO REAL
+// LOOP EXCLUSIVO DE CLIQUE EM TEMPO REAL (10ms)
 // ===================================
 function iniciarObservadorDeCliques(page) {
+  let processando = false;
+
   setInterval(async () => {
-    if (!URL_Y_LEITURA || !URL_X_LEITURA || page.isClosed()) return;
+    if (processando || !URL_CLICK || page.isClosed()) return;
+    processando = true;
 
     try {
-      const strY = await apiGet(URL_Y_LEITURA);
-      const strX = await apiGet(URL_X_LEITURA);
-
-      const y = parseFloat(strY);
-      const x = parseFloat(strX);
-
-      if (!isNaN(y) && !isNaN(x)) {
-        await apiPut(URL_Y_ESCRITA, "null");
-        await apiPut(URL_X_ESCRITA, "null");
-
-        await processarCliqueUnico(page, x, y);
-      }
-    } catch (err) {}
-  }, 500);
-}
-
-// ===================================
-// OBSERVADOR DE SCRIPT JS
-// ===================================
-function iniciarObservadorDeScript(page) {
-  setInterval(async () => {
-    if (!URL_SCRIPT || page.isClosed()) return;
-
-    try {
-      const codigo = await apiGet(URL_SCRIPT);
-
-      if (typeof codigo === "string" && codigo.trim() &&
-          codigo.trim() !== "null" && codigo.trim() !== "undefined") {
-
-        console.log("📜 JavaScript recebido da API. Executando...");
-
-        // Limpa primeiro para impedir execução duplicada.
-        await apiPut(URL_SCRIPT, "null");
-
-        await page.evaluate(async (codigoJS) => {
-          const resultado = (0, eval)(codigoJS);
-          if (resultado && typeof resultado.then === "function") {
-            await resultado;
-          }
-        }, codigo);
-
-        console.log("✅ JavaScript executado com sucesso.");
+      const dadosClick = await firebaseGet(URL_CLICK);
+      if (dadosClick) {
+        const listaCliques = Array.isArray(dadosClick) ? dadosClick : Object.values(dadosClick);
+        if (listaCliques.length > 0) {
+          await firebasePut(URL_CLICK, null);
+          await processarCliquesEmSequencia(page, listaCliques);
+        }
       }
     } catch (err) {
-      console.error("❌ Erro ao executar JavaScript:", err.message);
-      try { await apiPut(URL_SCRIPT, "null"); } catch {}
+      // Ignora erros pontuais
+    } finally {
+      processando = false;
     }
-  }, 500);
+  }, 10);
 }
 
 // ===================================
-// OBSERVADOR DE TEXTO PARA INSERÇÃO EM INPUTS
+// INJEÇÃO SEGURA DE SCRIPT VIA CONTEÚDO (S1)
 // ===================================
-function iniciarObservadorDeTextoInput(page) {
-  setInterval(async () => {
-    if (!URL_TEXT_INPUT_LEITURA || page.isClosed()) return;
+async function injetarScriptDoFirebase(page) {
+  try {
+    const codigoScript = await firebaseGet(URL_S);
+    
+    if (!codigoScript || typeof codigoScript !== "string" || codigoScript.trim().length === 0) {
+      return;
+    }
 
-    try {
-      const textoRecebido = await apiGet(URL_TEXT_INPUT_LEITURA);
+    await page.evaluate((scriptContent) => {
+      const ID_SCRIPT_INJETADO = "__custom_firebase_script__";
+      let antigo = document.getElementById(ID_SCRIPT_INJETADO);
+      if (antigo) antigo.remove();
 
-      if (typeof textoRecebido === "string" && textoRecebido.trim().length > 0 && textoRecebido.trim() !== "null") {
-        console.log(`📥 Texto recebido para colar nos inputs: "${textoRecebido}"`);
+      const s = document.createElement("script");
+      s.id = ID_SCRIPT_INJETADO;
+      s.textContent = scriptContent;
+      (document.body || document.documentElement).appendChild(s);
+      console.log("✅ Script do S1 injetado com sucesso.");
+    }, codigoScript);
 
-        // Apaga o conteúdo da API imediatamente para evitar loops/duplicações
-        await apiPut(URL_TEXT_INPUT_ESCRITA, "null");
-
-        // Identifica e preenche todos os inputs/textareas visíveis na página ativa
-        await page.evaluate((textoParaColar) => {
-          const inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea');
-          inputs.forEach(input => {
-            input.focus();
-            input.value = textoParaColar;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-          });
-        }, textoRecebido.trim());
-
-        console.log("✍️ Texto colado com sucesso em todos os inputs identificados.");
-      }
-    } catch (err) {}
-  }, 1000);
+  } catch (e) {
+    console.log("⚠️ Aviso ao injetar script do S1:", e.message);
+  }
 }
 
 // ===================================
 // PRINCIPAL
 // ===================================
 async function executar() {
-  console.log(`🆔 ID da Instância Gerado: ${ID_INSTANCIA}`);
+  console.log("🔍 Descobrindo o IP atual da rede/dispositivo...");
+  const ipAtual = await obterIpAtual();
   
-  BASE_API = `NAVEGADOR/NODE`;
-  URL_IPS_INDEX = urlLeitura(`${BASE_API}/IPS/index.json`);
-  URL_IPS_INDEX_ESCRITA = urlDownload(`${BASE_API}/IPS/index.json`);
-  
-  URL_IMG_TXT = urlDownload(`${BASE_API}/${ID_INSTANCIA}/IMG/index.txt`);
-  URL_REDIRECT_TXT = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`);
-  
-  URL_Y_LEITURA = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
-  URL_X_LEITURA = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/X/index.txt`);
-  URL_Y_ESCRITA = urlDownload(`${BASE_API}/${ID_INSTANCIA}/Y/index.txt`);
-  URL_X_ESCRITA = urlDownload(`${BASE_API}/${ID_INSTANCIA}/X/index.txt`);
+  CAMINHO_BASE = `${BASE_SERVIDOR}/NAVEGADOR-NODE/${ipAtual}`;
 
-  // JavaScript enviado pelo painel HTML para esta instância
-  URL_SCRIPT = urlLeitura(`${BASE_API}/${ID_INSTANCIA}/SCRIPT/index.txt`);
+  URL_CLICK = `${CAMINHO_BASE}/CLICK.json`;
+  URL_U = `${CAMINHO_BASE}/U1.json`;
+  URL_T = `${CAMINHO_BASE}/T1.json`;
+  URL_P = `${CAMINHO_BASE}/P1.json`;
+  URL_S = `${CAMINHO_BASE}/S1.json`;
 
-  // Caminhos para leitura e escrita do texto de inputs
-  URL_TEXT_INPUT_LEITURA = urlLeitura(`${BASE_API}/TEXT/INPUT/index.txt`);
-  URL_TEXT_INPUT_ESCRITA = urlDownload(`${BASE_API}/TEXT/INPUT/index.txt`);
+  console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
+  console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
-  try {
-    await apiPut(URL_Y_ESCRITA, "null");
-    await apiPut(URL_X_ESCRITA, "null");
-    await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
-    await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/SCRIPT/index.txt`), "null");
-  } catch (e) {}
-
-  await gerenciarIpNoIndexJson();
-
+  // Diretório de perfil local dentro de assets/database na raiz do projeto
   const userDataDir = path.join(__dirname, "assets", "database");
 
+  // Garante que o diretório exista e remove trava anterior (SingletonLock) se existir
   try {
     if (!fs.existsSync(userDataDir)) {
       fs.mkdirSync(userDataDir, { recursive: true });
@@ -365,9 +274,12 @@ async function executar() {
       const lockFile = path.join(userDataDir, "SingletonLock");
       if (fs.existsSync(lockFile)) {
         fs.unlinkSync(lockFile);
+        console.log("🧹 Trava de sessão anterior (SingletonLock) removida com sucesso.");
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.log("⚠️ Aviso ao gerenciar diretório de perfil:", e.message);
+  }
 
   const browser = await puppeteer.launch({
     headless: "new",
@@ -379,75 +291,102 @@ async function executar() {
       "--disable-gpu",
       "--single-process",
       "--disable-extensions",
+      "--disable-features=Translate,HttpsFirstBalancedModeAutoEnable",
       "--disable-web-security",
-      "--allow-running-insecure-content"
+      "--allow-running-insecure-content",
+      "--aggressive-cache-discard",
+      "--disk-cache-size=104857600",
+      "--no-zygote"
     ]
   });
 
   const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 720 });
+  
+  await page.setBypassCSP(true);
+  
+  page.on('targetcreated', async (target) => {
+    try {
+      const newPage = await target.page();
+      if (newPage && newPage !== page) {
+        const targetUrl = newPage.url();
+        if (targetUrl && targetUrl !== 'about:blank') {
+          console.log(`🔀 Redirecionando aba nova para a página principal: ${targetUrl}`);
+          await newPage.close();
+          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        }
+      }
+    } catch (e) {}
+  });
+
+  const larguraViewport = 1280;
+  const alturaViewport = 720;
+  await page.setViewport({ width: larguraViewport, height: alturaViewport });
 
   let ultimaURL = "https://google.com";
+
   console.log(`🌐 Abrindo página inicial: ${ultimaURL}`);
   
   try {
     await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 60000 });
-  } catch (err) {}
+  } catch (err) {
+    console.log("⚠️ Falha ao abrir página inicial:", err.message);
+  }
+
+  await injetarScriptDoFirebase(page);
+  console.log("✅ Sessão ativa + Firebase dinâmico conectado.");
 
   iniciarObservadorDeCliques(page);
-  iniciarObservadorDeTextoInput(page);
-  iniciarObservadorDeScript(page);
-
-  let contadorHeartbeat = 0;
 
   while (true) {
     try {
       const urlAtualNoBrowser = page.url();
       if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
         ultimaURL = urlAtualNoBrowser;
+        await firebasePut(URL_U, ultimaURL);
       }
 
-      // Lê URL de Redirecionamento da API
-      const rawRedirect = await apiGet(URL_REDIRECT_TXT);
-      if (typeof rawRedirect === "string" && rawRedirect.length > 0 && rawRedirect !== "null") {
-        const novaUrl = corrigirUrl(rawRedirect);
+      const rawNovaUrl = await firebaseGet(URL_U);
+      if (typeof rawNovaUrl === "string" && rawNovaUrl.length > 0) {
+        const novaUrl = corrigirUrl(rawNovaUrl);
+
         if (novaUrl.startsWith("http") && novaUrl !== ultimaURL) {
-          console.log(`🔀 Redirecionando para: ${novaUrl}`);
+          console.log(`🔀 URL Ajustada / Mudando para: ${novaUrl}`);
           try {
             await page.goto(novaUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
             ultimaURL = novaUrl;
-            await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
-    await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/SCRIPT/index.txt`), "null");
+            await firebasePut(URL_U, "");
+            await injetarScriptDoFirebase(page);
           } catch (navErr) {
-            await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/URL/REDIRECT/index.txt`), "null");
-    await apiPut(urlDownload(`${BASE_API}/${ID_INSTANCIA}/SCRIPT/index.txt`), "null");
+            console.error("❌ Erro de navegação:", navErr.message);
+            await firebasePut(URL_U, "");
           }
         }
       }
 
-      // Salva Screenshot atual convertido para Base64 (string) em IMG/index.txt via POST
-      if (!page.isClosed()) {
-        const screenshotBuffer = await page.screenshot({ type: "jpeg", quality: 50 });
-        const screenshotBase64 = screenshotBuffer.toString("base64");
-        
-        await apiPut(URL_IMG_TXT, screenshotBase64);
+      const texto = await firebaseGet(URL_T);
+      if (typeof texto === "string" && texto.length > 0) {
+        await page.keyboard.type(texto);
+        console.log("⌨ Texto digitado:", texto);
+        await firebasePut(URL_T, "");
       }
 
-      // Atualiza o heartbeat e os dados no index.json a cada 10 segundos
-      contadorHeartbeat++;
-      if (contadorHeartbeat >= 10) {
-        contadorHeartbeat = 0;
-        await gerenciarIpNoIndexJson();
+      if (!page.isClosed()) {
+        const screenshotBuffer = await page.screenshot({ encoding: "base64", type: "jpeg", quality: 50 });
+        const base64 = "data:image/jpeg;base64," + screenshotBuffer;
+        await firebasePut(URL_P, base64);
       }
 
     } catch (err) {
       console.error("Erro no loop:", err.message);
     }
 
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 800));
   }
 }
 
+// ===================================
+// INICIAR
+// ===================================
 executar().catch(err => {
   console.error("❌ Erro fatal:", err.message);
 });
