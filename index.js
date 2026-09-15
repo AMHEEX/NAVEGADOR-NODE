@@ -1,9 +1,9 @@
 /**
- * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (DOCKER / LINUX)
- * Otimizado: Salvando perfil, cache e dados na pasta local do projeto (assets/database).
+ * NAVEGADOR HEADLESS + FIREBASE DINÂMICO (IP PÚBLICO DA REDE)
+ * Otimizado: Salvando perfil, cache e dados na pasta compartilhada da memória interna.
  */
 
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-core");
 const https = require("https");
 const http = require("http");
 const path = require("path");
@@ -39,7 +39,7 @@ function obterIpAtual() {
 // ===================================
 // CONFIGURAÇÃO DO SERVIDOR E FIREBASE
 // ===================================
-const BASE_SERVIDOR = "https://server-exemplo-1-default-rtdb.firebaseio.com";
+const BASE_SERVIDOR = "https://servidor-de-exemplo-01-default-rtdb.firebaseio.com";
 
 let CAMINHO_BASE = "";
 let URL_CLICK, URL_U, URL_T, URL_P, URL_S;
@@ -263,26 +263,23 @@ async function executar() {
   console.log(`🌐 IP Atual Identificado: ${ipAtual}`);
   console.log(`🌐 Caminho dinâmico ativo: ${CAMINHO_BASE}`);
 
-  // Diretório de perfil local dentro de assets/database na raiz do projeto
-  const userDataDir = path.join(__dirname, "assets", "database");
+  const chromiumPath = "/data/data/com.termux/files/usr/bin/chromium-browser";
+  
+  // Diretório na memória interna/compartilhada configurado pelo usuário
+  const userDataDir = "/data/data/com.termux/files/home/NAVEGADOR-NODE/assets/database";
 
-  // Garante que o diretório exista e remove trava anterior (SingletonLock) se existir
+  // Garante que o diretório exista antes de iniciar o navegador
   try {
     if (!fs.existsSync(userDataDir)) {
       fs.mkdirSync(userDataDir, { recursive: true });
-    } else {
-      const lockFile = path.join(userDataDir, "SingletonLock");
-      if (fs.existsSync(lockFile)) {
-        fs.unlinkSync(lockFile);
-        console.log("🧹 Trava de sessão anterior (SingletonLock) removida com sucesso.");
-      }
     }
   } catch (e) {
-    console.log("⚠️ Aviso ao gerenciar diretório de perfil:", e.message);
+    console.log("⚠️ Aviso ao criar diretório de perfil:", e.message);
   }
 
   const browser = await puppeteer.launch({
-    headless: "new",
+    headless: true,
+    executablePath: chromiumPath,
     userDataDir: userDataDir,
     args: [
       "--no-sandbox",
@@ -295,8 +292,7 @@ async function executar() {
       "--disable-web-security",
       "--allow-running-insecure-content",
       "--aggressive-cache-discard",
-      "--disk-cache-size=104857600",
-      "--no-zygote"
+      "--disk-cache-size=104857600"
     ]
   });
 
