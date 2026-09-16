@@ -116,7 +116,7 @@ function corrigirUrl(urlSuja) {
 }
 
 // ===================================
-// CLIQUE SEGURO UNIFICADO
+// CLIQUE SEGURO UNIFICADO (COM SUPORTE A IFRAMES E FRAMES)
 // ===================================
 async function clickAt(page, xRatio, yRatio) {
   try {
@@ -129,10 +129,27 @@ async function clickAt(page, xRatio, yRatio) {
     const px = Math.max(0, Math.floor(xRatio * pageSize.width));
     const py = Math.max(0, Math.floor(yRatio * pageSize.height));
 
+    // Move o mouse do Puppeteer para disparar eventos nativos de hover/focus
     await page.mouse.move(px, py);
+    await page.mouse.down();
+    await page.mouse.up();
 
+    // Executa varredura profunda incluindo sub-frames (iframes)
     await page.evaluate((xCoord, yCoord) => {
-      const elemento = document.elementFromPoint(xCoord, yCoord);
+      function findElementDeep(doc, x, y) {
+        let el = doc.elementFromPoint(x, y);
+        if (el && el.tagName && el.tagName.toLowerCase() === 'iframe') {
+          try {
+            const frameDoc = el.contentDocument || el.contentWindow.document;
+            const rect = el.getBoundingClientRect();
+            const subEl = findElementDeep(frameDoc, x - rect.left, y - rect.top);
+            if (subEl) return subEl;
+          } catch (e) {}
+        }
+        return el;
+      }
+
+      const elemento = findElementDeep(document, xCoord, yCoord);
       if (!elemento) return;
 
       const opts = {
@@ -142,7 +159,9 @@ async function clickAt(page, xRatio, yRatio) {
 
       elemento.dispatchEvent(new MouseEvent('mouseover', opts));
       elemento.dispatchEvent(new MouseEvent('mousedown', opts));
-      elemento.focus({ preventScroll: true });
+      if (typeof elemento.focus === 'function') {
+        elemento.focus({ preventScroll: true });
+      }
       elemento.dispatchEvent(new MouseEvent('mouseup', opts));
       elemento.dispatchEvent(new MouseEvent('click', opts));
 
@@ -153,12 +172,12 @@ async function clickAt(page, xRatio, yRatio) {
 
     console.log(`🖱 Clique → X=${px} Y=${py}`);
   } catch (err) {
-    console.log("⚠️ Aviso no clique (navegação detectada):", err.message);
+    console.log("⚠️ Aviso no clique:", err.message);
   }
 }
 
 // ===================================
-// INSERIR E SUBSTITUIR TEXTO EM INPUTS
+// INSERIR E SUBSTITUIR TEXTO EM INPUTS (COM SUPORTE A REACT/VUE E DIGITAÇÃO)
 // ===================================
 async function setText(page, textValue) {
   if (!textValue || typeof textValue !== "string" || !textValue.trim()) return;
@@ -166,15 +185,32 @@ async function setText(page, textValue) {
     const filled = await page.evaluate((valor) => {
       let ativo = document.activeElement;
       
-      if (!ativo || (ativo.tagName !== 'INPUT' && ativo.tagName !== 'TEXTAREA' && !ativo.isContentEditable)) {
-        ativo = document.querySelector('input:not([type="hidden"]), textarea, [contenteditable="true"]');
+      // Valida se o elemento ativo é um campo aceitável de escrita
+      if (!ativo || (ativo.tagName !== 'INPUT' && ativo.tagName !== 'TEXTAREA' && !ativo.isContentEditable) || (ativo.tagName === 'INPUT' && ['file', 'hidden', 'submit', 'button', 'checkbox', 'radio'].includes(ativo.type))) {
+        ativo = document.querySelector('input:not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"]');
       }
 
       if (ativo) {
         ativo.focus();
-        ativo.value = valor;
-        ativo.dispatchEvent(new Event('input', { bubbles: true }));
+        
+        // Compatibilidade avançada para frameworks modernos (React/Vue/Angular setter)
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+
+        if (ativo.tagName === 'INPUT' && nativeInputValueSetter) {
+          nativeInputValueSetter.call(ativo, valor);
+        } else if (ativo.tagName === 'TEXTAREA' && nativeTextAreaValueSetter) {
+          nativeTextAreaValueSetter.call(ativo, valor);
+        } else {
+          ativo.value = valor;
+        }
+
+        // Dispara todos os eventos essenciais para que o site processe o valor preenchido
+        ativo.dispatchEvent(new Event('focus', { bubbles: true }));
+        ativo.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: valor.charAt(0) }));
+        ativo.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: valor }));
         ativo.dispatchEvent(new Event('change', { bubbles: true }));
+        ativo.dispatchEvent(new Event('blur', { bubbles: true }));
         return true;
       }
       return false;
@@ -183,8 +219,9 @@ async function setText(page, textValue) {
     if (filled) {
       console.log("⌨ Texto substituído/inserido nos inputs com sucesso:", textValue);
     } else {
-      await page.keyboard.type(textValue);
-      console.log("⌨ Texto digitado via teclado:", textValue);
+      // Fallback drástico simulando digitação real via teclado físico do Puppeteer
+      await page.keyboard.type(textValue, { delay: 50 });
+      console.log("⌨ Texto digitado via teclado virtual:", textValue);
     }
   } catch (err) {
     console.log("⚠️ Erro ao inserir texto:", err.message);
@@ -301,7 +338,6 @@ async function executar() {
 
   while (true) {
     try {
-      // Correção aplicada aqui (removido os parênteses de isConnected)
       if (!browser.connected || page.isClosed()) {
         console.error("❌ O navegador foi fechado inesperadamente.");
         break;
