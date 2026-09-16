@@ -42,7 +42,7 @@ limparDatabaseCompleto();
 
 // Garante um JSON inicial local se não existir
 if (!fs.existsSync(LOCAL_JSON)) {
-  fs.writeFileSync(LOCAL_JSON, JSON.stringify({ site: "https://google.com" }, null, 2));
+  fs.writeFileSync(LOCAL_JSON, JSON.stringify({ site: "https://google.com", text: "", script: "" }, null, 2));
 }
 
 // ===================================
@@ -158,13 +158,39 @@ async function clickAt(page, xRatio, yRatio) {
 }
 
 // ===================================
-// INSERIR TEXTO SEGURO
+// INSERIR E SUBSTITUIR TEXTO EM INPUTS
 // ===================================
-async function setText(page, text) {
-  if (!text) return;
+async function setText(page, textValue) {
+  if (!textValue || typeof textValue !== "string" || !textValue.trim()) return;
   try {
-    await page.keyboard.type(text);
-    console.log("⌨ Texto inserido:", text);
+    // Procura por um input ou elemento focado/ativo na página para preencher
+    const filled = await page.evaluate((valor) => {
+      let ativo = document.activeElement;
+      
+      // Se o elemento ativo não for um input/textarea editável, pega o primeiro input visível da página
+      if (!ativo || (ativo.tagName !== 'INPUT' && ativo.tagName !== 'TEXTAREA' && !ativo.isContentEditable)) {
+        ativo = document.querySelector('input:not([type="hidden"]), textarea, [contenteditable="true"]');
+      }
+
+      if (ativo) {
+        ativo.focus();
+        ativo.value = valor; // Substitui o texto diretamente
+        
+        // Dispara eventos para garantir que a página reconheça a alteração via JS/Frameworks (React, Vue, etc)
+        ativo.dispatchEvent(new Event('input', { bubbles: true }));
+        ativo.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+      return false;
+    }, textValue);
+
+    if (filled) {
+      console.log("⌨ Texto substituído/inserido nos inputs com sucesso:", textValue);
+    } else {
+      // Fallback para digitação via teclado do Puppeteer se nenhum elemento for encontrado diretamente
+      await page.keyboard.type(textValue);
+      console.log("⌨ Texto digitado via teclado:", textValue);
+    }
   } catch (err) {
     console.log("⚠️ Erro ao inserir texto:", err.message);
   }
@@ -210,7 +236,7 @@ async function screenshotSmart(page) {
 
     if (fs.existsSync(IMAGE_PATH)) fs.unlinkSync(IMAGE_PATH);
     fs.renameSync(TMP_IMAGE, IMAGE_PATH);
-    // console.log("📸 Screenshot atualizado em assets/index.png");
+    console.log("📸 Screenshot atualizado em assets/index.png");
   } catch (err) {
     console.log("Erro no screenshot:", err.message);
   }
@@ -320,10 +346,10 @@ async function executar() {
         saveJSON(novoJSON);
       }
 
-      // Texto via JSON local
-      if (novoJSON.text && novoJSON.text !== ultimoJSON.text) {
+      // Processa o Texto / Inputs e limpa imediatamente do JSON para evitar loops
+      if (novoJSON.text && novoJSON.text.trim() !== "") {
         await setText(page, novoJSON.text);
-        delete novoJSON.text;
+        novoJSON.text = ""; // Zera o campo para evitar loop de substituição
         saveJSON(novoJSON);
       }
 
