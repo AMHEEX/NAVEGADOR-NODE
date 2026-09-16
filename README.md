@@ -3,7 +3,7 @@
 ## O que é?
 Navegador headless completo baseado em **Puppeteer + PHP + Termux**, com interface moderna, toque, mouse e controles remotos.
 
-## Ícone do Projeto
+## Imagem do navegador-node : 
 ![IAMEGM REPSOTIROI](assets/index.png)
 
 ## Recursos
