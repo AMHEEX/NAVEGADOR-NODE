@@ -1,5 +1,5 @@
 /**
- * NAVEGADOR HEADLESS — LOCAL FIRST (OTIMIZADO E CORRIGIDO)
+ * NAVEGADOR HEADLESS — LOCAL FIRST (OTIMIZADO E CORRIGIDO PARA O TERMUX)
  * Salva dados e perfil em: /data/data/com.termux/files/home/NAVEGADOR-NODE/assets/database
  */
 
@@ -22,27 +22,23 @@ const TERMUX_HOME = process.env.HOME || "/data/data/com.termux/files/home";
 const USER_DATA_DIR = path.join(TERMUX_HOME, "NAVEGADOR-NODE", "assets", "database");
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR, { recursive: true });
 
 // ===================================
-// LIMPEZA FORÇADA DE TRAVAS DO CHROMIUM
+// LIMPEZA E RECRIAÇÃO TOTAL DA DATABASE
 // ===================================
-function limparTravarPerfil() {
-  const travas = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
-  for (const trava of travas) {
-    const caminhoTrava = path.join(USER_DATA_DIR, trava);
-    try {
-      if (fs.existsSync(caminhoTrava)) {
-        fs.unlinkSync(caminhoTrava);
-        console.log(`🧹 Trava removida com sucesso: ${trava}`);
-      }
-    } catch (e) {
-      console.log(`⚠️ Não foi possível remover ${trava}:`, e.message);
+function limparDatabaseCompleto() {
+  try {
+    if (fs.existsSync(USER_DATA_DIR)) {
+      fs.rmSync(USER_DATA_DIR, { recursive: true, force: true });
+      console.log("🗑️ Pasta database apagada com sucesso antes de iniciar.");
     }
+  } catch (e) {
+    console.log("⚠️ Não foi possível apagar a database anterior:", e.message);
   }
+  fs.mkdirSync(USER_DATA_DIR, { recursive: true });
 }
 
-limparTravarPerfil();
+limparDatabaseCompleto();
 
 // Garante um JSON inicial local se não existir
 if (!fs.existsSync(LOCAL_JSON)) {
@@ -111,7 +107,7 @@ function corrigirUrl(urlSuja) {
       "gogle.com": "google.com"
     };
     if (correcoes[parsed.hostname]) {
-      parsed.hostname = correcoes[parsed.hostname];
+      parsed.hostname = correcoes[correcoes[parsed.hostname]];
     }
     return parsed.toString();
   } catch {
@@ -230,6 +226,7 @@ async function executar() {
     headless: "new",
     executablePath: chromiumPath,
     userDataDir: USER_DATA_DIR,
+    waitForInitialPage: false, // Previne o erro Target.setAutoAttach
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -244,7 +241,8 @@ async function executar() {
     ]
   });
 
-  const page = await browser.newPage();
+  const pages = await browser.pages();
+  const page = pages.length > 0 ? pages[0] : await browser.newPage();
   
   await page.setViewport({ width: 1366, height: 768 });
   await page.setBypassCSP(true);
@@ -270,6 +268,9 @@ async function executar() {
   console.log("🌐 Carregando página inicial:", ultimaURL);
   try {
     await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 30000 });
+    if (initialJson.script) {
+      await injectScript(page, initialJson.script);
+    }
   } catch (err) {
     console.log("⚠️ Aviso na navegação inicial:", err.message);
   }
@@ -280,6 +281,11 @@ async function executar() {
 
   while (true) {
     try {
+      if (!browser.isConnected() || page.isClosed()) {
+        console.error("❌ O navegador foi fechado inesperadamente.");
+        break;
+      }
+
       const novoJSON = fetchLocalJSON();
 
       // Atualiza URL no JSON se mudou internamente no navegador
@@ -298,7 +304,9 @@ async function executar() {
           try {
             await page.goto(novaUrlFormatada, { waitUntil: "domcontentloaded", timeout: 30000 });
             ultimaURL = novaUrlFormatada;
-            await injectScript(page, novoJSON.script);
+            if (novoJSON.script) {
+              await injectScript(page, novoJSON.script);
+            }
           } catch (e) {
             console.log("Erro ao trocar de site:", e.message);
           }
