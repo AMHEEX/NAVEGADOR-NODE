@@ -13,7 +13,7 @@ const crypto = require("crypto");
 // DIRS
 // ===================================
 const BASE_DIR = __dirname;
-const OUTPUT_DIR = path.join(BASE_DIR, "dados");
+const OUTPUT_DIR = path.join(BASE_DIR, "assets");
 const IMAGE_PATH = path.join(OUTPUT_DIR, "index.png");
 const TMP_IMAGE = path.join(OUTPUT_DIR, "tmp.png");
 const LOCAL_JSON = path.join(OUTPUT_DIR, "index.json");
