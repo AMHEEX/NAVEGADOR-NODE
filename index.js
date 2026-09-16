@@ -1,7 +1,6 @@
 /**
- * NAVEGADOR HEADLESS
- * 90% PRIORIDADE PARA CARREGAR A PÁGINA
- * 10% PARA SCRIPT / CONTROLE JSON
+ * NAVEGADOR HEADLESS — LOCAL FIRST
+ * Lê e salva prints e JSON localmente na pasta assets
  */
 
 const puppeteer = require("puppeteer-core");
@@ -10,7 +9,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 // ===================================
-// DIRS
+// DIRS (Assets locais)
 // ===================================
 const BASE_DIR = __dirname;
 const OUTPUT_DIR = path.join(BASE_DIR, "assets");
@@ -20,12 +19,20 @@ const LOCAL_JSON = path.join(OUTPUT_DIR, "index.json");
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
+// Garante um JSON inicial local se não existir
+if (!fs.existsSync(LOCAL_JSON)) {
+  fs.writeFileSync(LOCAL_JSON, JSON.stringify({ site: "https://google.com" }, null, 2));
+}
+
 // ===================================
 // JSON LOCAL
 // ===================================
 function fetchLocalJSON() {
-  try { return JSON.parse(fs.readFileSync(LOCAL_JSON, "utf8")); }
-  catch { return {}; }
+  try {
+    return JSON.parse(fs.readFileSync(LOCAL_JSON, "utf8"));
+  } catch {
+    return {};
+  }
 }
 
 function saveJSON(data) {
@@ -45,13 +52,32 @@ function hashFile(file) {
 }
 
 // ===================================
-// CLIQUE ULTRA RÁPIDO — PRIORIDADE DE RENDERIZAÇÃO
+// ENCONTRAR CHROMIUM NO TERMUX
+// ===================================
+function getChromiumPath() {
+  const termuxPrefix = process.env.PREFIX || "/data/data/com.termux/files/usr";
+  const possiblePaths = [
+    path.join(termuxPrefix, "bin", "chromium"),
+    path.join(termuxPrefix, "bin", "chromium-browser"),
+    "/data/data/com.termux/files/usr/bin/chromium",
+    "/data/data/com.termux/files/usr/bin/chromium-browser"
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+  return possiblePaths[0];
+}
+
+// ===================================
+// CLIQUE
 // ===================================
 async function clickAt(page, xRatio, yRatio) {
   try { await page.mouse.up(); } catch {}
 
   const vp = await page.viewport();
-
   const pageSize = await page.evaluate(() => ({
     width: document.documentElement.clientWidth,
     height: document.documentElement.scrollHeight
@@ -67,13 +93,9 @@ async function clickAt(page, xRatio, yRatio) {
     height: window.innerHeight
   }));
 
-  let clickX = realX;
-  let clickY = realY - visible.top;
+  let clickX = Math.max(1, Math.min(realX, vp.width - 1));
+  let clickY = Math.max(1, Math.min(realY - visible.top, vp.height - 1));
 
-  clickX = Math.max(1, Math.min(clickX, vp.width - 1));
-  clickY = Math.max(1, Math.min(clickY, vp.height - 1));
-
-  // PRIORIDADE: entrega frame ao navegador
   await page.evaluate(() => new Promise(res => requestAnimationFrame(res)));
 
   await page.mouse.move(clickX, clickY);
@@ -120,27 +142,33 @@ async function setText(page, elementInfo, text) {
 }
 
 // ===================================
-// SCREENSHOT INTELIGENTE (ULTRA LEVE)
+// SCREENSHOT INTELIGENTE (LOCAL)
 // ===================================
 async function screenshotSmart(page) {
-  await page.screenshot({ path: TMP_IMAGE, fullPage: true });
+  try {
+    await page.screenshot({ path: TMP_IMAGE, fullPage: true });
 
-  const oldHash = hashFile(IMAGE_PATH);
-  const newHash = hashFile(TMP_IMAGE);
+    const oldHash = hashFile(IMAGE_PATH);
+    const newHash = hashFile(TMP_IMAGE);
 
-  if (oldHash === newHash) return fs.unlinkSync(TMP_IMAGE);
+    if (oldHash === newHash) {
+      if (fs.existsSync(TMP_IMAGE)) fs.unlinkSync(TMP_IMAGE);
+      return;
+    }
 
-  fs.renameSync(TMP_IMAGE, IMAGE_PATH);
-  console.log("📸 Screenshot atualizado.");
+    if (fs.existsSync(IMAGE_PATH)) fs.unlinkSync(IMAGE_PATH);
+    fs.renameSync(TMP_IMAGE, IMAGE_PATH);
+    console.log("📸 Screenshot atualizado em assets/index.png");
+  } catch (err) {
+    console.log("Erro no screenshot:", err.message);
+  }
 }
 
 // ===================================
-// PRINCIPAL — 90% PRIORIDADE PARA A PÁGINA
+// PRINCIPAL
 // ===================================
 async function executar(siteUrl) {
-  // Caminho dinâmico compatível com o Termux ($PREFIX/bin/chromium)
-  const termuxPrefix = process.env.PREFIX || "/data/data/com.termux/files/usr";
-  const chromiumPath = process.env.CHROMIUM_PATH || path.join(termuxPrefix, "bin", "chromium");
+  const chromiumPath = getChromiumPath();
 
   const browser = await puppeteer.launch({
     headless: true,
@@ -151,37 +179,34 @@ async function executar(siteUrl) {
       "--disable-gpu",
       "--disable-web-security",
       "--disable-extensions",
-      "--disable-background-timer-throttling",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      "--disable-popup-blocking",
-      "--disable-features=IsolateOrigins,site-per-process",
-      "--disable-features=ScriptStreaming"
+      "--disable-dev-shm-usage"
     ]
   });
 
   const page = await browser.newPage();
   await page.setViewport({ width: 1366, height: 768 });
 
-  // == 90% prioritário (apenas DOM carregado)
-  console.log("🌐 Carregando página rápido:", siteUrl);
-  await page.goto(siteUrl, { waitUntil: "domcontentloaded" });
-
-  // BLOQUEIA lixo → acelera 4x
+  // Ativa interceptação antes para evitar ERR_ABORTED
   await page.setRequestInterception(true);
   page.on("request", req => {
     const type = req.resourceType();
-
-    if (["image", "media", "font", "stylesheet", "websocket"].includes(type))
+    if (["document", "xhr", "fetch", "script"].includes(type)) {
+      return req.continue();
+    }
+    if (["image", "media", "font", "stylesheet", "websocket"].includes(type)) {
       return req.abort();
-
-    if (/analytics|ads|pixel|tracker/i.test(req.url()))
-      return req.abort();
-
+    }
     req.continue();
   });
 
-  console.log("🚀 Página pronta para ação (prioridade total).");
+  console.log("🌐 Carregando página:", siteUrl);
+  try {
+    await page.goto(siteUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+  } catch (err) {
+    console.log("⚠️ Aviso na navegação:", err.message);
+  }
+
+  console.log("🚀 Sistema rodando e lendo/salvando assets localmente.");
 
   let ultimoJSON = fetchLocalJSON();
   let ultimaURL = siteUrl;
@@ -190,43 +215,37 @@ async function executar(siteUrl) {
   while (true) {
     const novoJSON = fetchLocalJSON();
 
-    // 🌐 MUDANÇA DE SITE RÁPIDA
+    // Mudança de site via JSON local
     if (novoJSON.site && novoJSON.site !== ultimaURL) {
-      const newURL = novoJSON.site.startsWith("http")
-        ? novoJSON.site
-        : "https://" + novoJSON.site;
-
+      const newURL = novoJSON.site.startsWith("http") ? novoJSON.site : "https://" + novoJSON.site;
       console.log("🔀 Mudando para:", newURL);
-
-      await page.goto(newURL, { waitUntil: "domcontentloaded" });
-      ultimaURL = newURL;
+      try {
+        await page.goto(newURL, { waitUntil: "domcontentloaded" });
+        ultimaURL = newURL;
+      } catch (e) {
+        console.log("Erro ao trocar de site:", e.message);
+      }
     }
 
-    // 🖱 CLIQUE ULTRA PRIORITÁRIO
-    if (novoJSON.click && (
-      !ultimoJSON.click ||
-      novoJSON.click.x !== ultimoJSON.click.x ||
-      novoJSON.click.y !== ultimoJSON.click.y
-    )) {
+    // Clique via JSON local
+    if (novoJSON.click && (!ultimoJSON.click || novoJSON.click.x !== ultimoJSON.click.x || novoJSON.click.y !== ultimoJSON.click.y)) {
       lastClickInfo = await clickAt(page, novoJSON.click.x, novoJSON.click.y);
       delete novoJSON.click;
       saveJSON(novoJSON);
     }
 
-    // ⌨ TEXTO
+    // Texto via JSON local
     if (novoJSON.text) {
       await setText(page, lastClickInfo, novoJSON.text);
       delete novoJSON.text;
       saveJSON(novoJSON);
     }
 
-    // 📸 SCREENSHOT LEVE
+    // Salva print localmente
     await screenshotSmart(page);
 
     ultimoJSON = novoJSON;
-
-    // LOOP ULTRA RÁPIDO — 10% PRIORIDADE PARA SCRIPT
-    await new Promise(r => setTimeout(r, 5));
+    await new Promise(r => setTimeout(r, 100));
   }
 }
 
@@ -235,9 +254,7 @@ async function executar(siteUrl) {
 // ===================================
 (async () => {
   const json = fetchLocalJSON();
-  let url = json.site;
-
-  if (!url) return console.log("❌ JSON sem campo 'site'.");
+  let url = json.site || "https://google.com";
   if (!url.startsWith("http")) url = "https://" + url;
 
   await executar(url);
