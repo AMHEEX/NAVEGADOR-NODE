@@ -15,7 +15,7 @@ Navegador headless completo baseado em **Puppeteer + PHP + Termux**, com interfa
 - Screenshot automático
 - Funciona **100% offline** no Termux
 
-## Instalação (1 comando)
+## Instalação Unica (Recomendado) : 
 
 ```bash
-pkg install x11-repo chromium -y && bash <(curl -s https://raw.githubusercontent.com/AMHEEX/NAVEGADOR-NODE/main/index.sh)
+pkg install x11-repo chromium -y && bash <(curl -s https://raw.githubusercontent.com/AMHEEX/NAVEGADOR-NODE/main/index.sh)```
