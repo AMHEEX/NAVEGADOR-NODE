@@ -4,7 +4,7 @@
 Navegador headless completo baseado em **Puppeteer + PHP + Termux**, com interface moderna, toque, mouse e controles remotos.
 
 ## Ícone do Projeto
-![](https://raw.github.com/AMHEEX/NAVEGADOR-NODE/assets/index.png)
+![](https://github.com/AMHEEX/NAVEGADOR-NODE/assets/index.png)
 
 ## Recursos
 - Navegador remoto real
