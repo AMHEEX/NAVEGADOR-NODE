@@ -1,6 +1,6 @@
 /**
- * NAVEGADOR HEADLESS — LOCAL FIRST (OTIMIZADO SEM BUGAR O DOM)
- * Lê e salva prints e JSON localmente na pasta assets
+ * NAVEGADOR HEADLESS — LOCAL FIRST (OTIMIZADO E CORRIGIDO)
+ * Salva dados e perfil em: /data/data/com.termux/files/home/NAVEGADOR-NODE/assets/database
  */
 
 const puppeteer = require("puppeteer-core");
@@ -9,24 +9,40 @@ const path = require("path");
 const crypto = require("crypto");
 
 // ===================================
-// DIRS (Assets locais)
+// DIRS (Assets locais no Termux)
 // ===================================
 const BASE_DIR = __dirname;
 const OUTPUT_DIR = path.join(BASE_DIR, "assets");
 const IMAGE_PATH = path.join(OUTPUT_DIR, "index.png");
 const TMP_IMAGE = path.join(OUTPUT_DIR, "tmp.png");
 const LOCAL_JSON = path.join(OUTPUT_DIR, "index.json");
-const USER_DATA_DIR = path.join(OUTPUT_DIR, "database");
+
+// Caminho exato e absoluto para evitar conflitos no Termux
+const TERMUX_HOME = process.env.HOME || "/data/data/com.termux/files/home";
+const USER_DATA_DIR = path.join(TERMUX_HOME, "NAVEGADOR-NODE", "assets", "database");
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR, { recursive: true });
 
-// Limpa trava anterior se existir para evitar crash de perfil
-try {
-  if (fs.existsSync(USER_DATA_DIR)) {
-    const lockFile = path.join(USER_DATA_DIR, "SingletonLock");
-    if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+// ===================================
+// LIMPEZA FORÇADA DE TRAVAS DO CHROMIUM
+// ===================================
+function limparTravarPerfil() {
+  const travas = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
+  for (const trava of travas) {
+    const caminhoTrava = path.join(USER_DATA_DIR, trava);
+    try {
+      if (fs.existsSync(caminhoTrava)) {
+        fs.unlinkSync(caminhoTrava);
+        console.log(`🧹 Trava removida com sucesso: ${trava}`);
+      }
+    } catch (e) {
+      console.log(`⚠️ Não foi possível remover ${trava}:`, e.message);
+    }
   }
-} catch (e) {}
+}
+
+limparTravarPerfil();
 
 // Garante um JSON inicial local se não existir
 if (!fs.existsSync(LOCAL_JSON)) {
@@ -95,7 +111,7 @@ function corrigirUrl(urlSuja) {
       "gogle.com": "google.com"
     };
     if (correcoes[parsed.hostname]) {
-      parsed.hostname = correcoes[correcoes[parsed.hostname]];
+      parsed.hostname = correcoes[parsed.hostname];
     }
     return parsed.toString();
   } catch {
@@ -159,7 +175,7 @@ async function setText(page, text) {
 }
 
 // ===================================
-// INJEÇÃO SEGURA DE SCRIPT (SEM BUGAR DOM)
+// INJEÇÃO SEGURA DE SCRIPT
 // ===================================
 async function injectScript(page, codeScript) {
   if (!codeScript || !codeScript.trim()) return;
@@ -233,7 +249,7 @@ async function executar() {
   await page.setViewport({ width: 1366, height: 768 });
   await page.setBypassCSP(true);
 
-  // Tratamento de novas abas indesejadas (evita crash ao abrir links externos como YouTube)
+  // Tratamento de novas abas (evita crash ao abrir links externos como YouTube)
   page.on('targetcreated', async (target) => {
     try {
       const newPage = await target.page();
@@ -303,7 +319,7 @@ async function executar() {
         saveJSON(novoJSON);
       }
 
-      // Injeção de Script JS via JSON local (Sem quebrar o DOM)
+      // Injeção de Script JS via JSON local
       if (novoJSON.script && novoJSON.script !== ultimoJSON.script) {
         await injectScript(page, novoJSON.script);
       }
