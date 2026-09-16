@@ -210,7 +210,7 @@ async function screenshotSmart(page) {
 
     if (fs.existsSync(IMAGE_PATH)) fs.unlinkSync(IMAGE_PATH);
     fs.renameSync(TMP_IMAGE, IMAGE_PATH);
-    console.log("📸 Screenshot atualizado em assets/index.png");
+    // console.log("📸 Screenshot atualizado em assets/index.png");
   } catch (err) {
     console.log("Erro no screenshot:", err.message);
   }
