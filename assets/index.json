@@ -1,11 +1,12 @@
 {
-  "site": "https://google.com",
-  "file": "imagem.png",
-  "mime": "image/png",
-  "time": 1736190000,
-  "click": {
-    "x": 0.5321,
-    "y": 0.2289
-  },
-  "text": ""
+    "site": "https:\/\/www.youtube.com\/",
+    "file": "imagem.png",
+    "mime": "image\/png",
+    "time": 1789523367,
+    "text": "",
+    "script": "",
+    "click": {
+        "x": 0.6828,
+        "y": 0.4173
+    }
 }
