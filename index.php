@@ -3,7 +3,9 @@ $baseDir   = __DIR__;
 $metaFile  = $baseDir . "/assets/index.json";
 $imageFile = $baseDir . "/assets/index.png";
 
-if (!is_dir($baseDir . "/assets")) mkdir($baseDir . "/assets", 0777, true);
+if (!is_dir($baseDir . "/assets")) {
+    mkdir($baseDir . "/assets", 0777, true);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents("php://input"), true) ?? [];
@@ -27,14 +29,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $jsonAtual['time'] = time();
     file_put_contents($metaFile, json_encode($jsonAtual, JSON_PRETTY_PRINT));
+    
+    header('Content-Type: application/json');
     echo json_encode(["status" => "ok", "time" => $jsonAtual['time']]);
     exit;
 }
 
 $json = file_exists($metaFile) ? json_decode(file_get_contents($metaFile), true) : [];
-$click = $json['click'] ?? null;
-$text  = $json['text'] ?? "";
-$site  = $json['site'] ?? "";
+$click  = $json['click'] ?? null;
+$text   = $json['text'] ?? "";
+$site   = $json['site'] ?? "";
 $script = $json['script'] ?? "";
 $temImagem = file_exists($imageFile);
 ?>
@@ -330,7 +334,7 @@ $temImagem = file_exists($imageFile);
 
     <div class="container-tela">
         <?php if (!$temImagem): ?>
-            <div style="color: #a0aec0; font-size: 14px;">Nenhuma imagem disponível ainda...</div>
+            <div id="mensagemAviso" style="color: #a0aec0; font-size: 14px;">Nenhuma imagem disponível ainda...</div>
         <?php else: ?>
             <img id="telaRemota" src="assets/index.png?t=<?= time() ?>" alt="Aguardando print...">
         <?php endif; ?>
@@ -367,7 +371,14 @@ $temImagem = file_exists($imageFile);
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload)
                 });
-                const data = await res.json();
+                await res.json();
+                
+                // Se a imagem ainda não existia no carregamento, recarrega a página para exibi-la dinamicamente
+                if (!imgTela) {
+                    location.reload();
+                    return;
+                }
+
                 if (imgTela) {
                     imgTela.src = "assets/index.png?t=" + Date.now();
                 }
@@ -501,7 +512,7 @@ $temImagem = file_exists($imageFile);
         });
 
         document.getElementById("btnEnviarTexto").addEventListener("click", () => {
-            menuFlutu_antec = menuFlutuante.style.display = "none";
+            menuFlutuante.style.display = "none";
             iconFlutuante.style.display = "block";
 
             mostrarModalInput({
