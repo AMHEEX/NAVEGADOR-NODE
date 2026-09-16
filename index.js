@@ -1,5 +1,5 @@
 /**
- * NAVEGADOR HEADLESS — LOCAL FIRST
+ * NAVEGADOR HEADLESS — LOCAL FIRST (OTIMIZADO SEM BUGAR O DOM)
  * Lê e salva prints e JSON localmente na pasta assets
  */
 
@@ -16,8 +16,17 @@ const OUTPUT_DIR = path.join(BASE_DIR, "assets");
 const IMAGE_PATH = path.join(OUTPUT_DIR, "index.png");
 const TMP_IMAGE = path.join(OUTPUT_DIR, "tmp.png");
 const LOCAL_JSON = path.join(OUTPUT_DIR, "index.json");
+const USER_DATA_DIR = path.join(OUTPUT_DIR, "database");
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+// Limpa trava anterior se existir para evitar crash de perfil
+try {
+  if (fs.existsSync(USER_DATA_DIR)) {
+    const lockFile = path.join(USER_DATA_DIR, "SingletonLock");
+    if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+  }
+} catch (e) {}
 
 // Garante um JSON inicial local se não existir
 if (!fs.existsSync(LOCAL_JSON)) {
@@ -64,19 +73,40 @@ function getChromiumPath() {
   ];
 
   for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
+    if (fs.existsSync(p)) return p;
   }
   return possiblePaths[0];
 }
 
 // ===================================
-// CLIQUE (COM TRATAMENTO DE CONTEXTO DESTRUÍDO)
+// CORRETOR DE URL
+// ===================================
+function corrigirUrl(urlSuja) {
+  if (!urlSuja || typeof urlSuja !== "string") return "https://google.com";
+  let url = urlSuja.trim();
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = "https://" + url;
+  }
+  try {
+    const parsed = new URL(url);
+    const correcoes = {
+      "youtueb.com": "youtube.com",
+      "youtbe.com": "youtube.com",
+      "gogle.com": "google.com"
+    };
+    if (correcoes[parsed.hostname]) {
+      parsed.hostname = correcoes[correcoes[parsed.hostname]];
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+// ===================================
+// CLIQUE SEGURO UNIFICADO
 // ===================================
 async function clickAt(page, xRatio, yRatio) {
-  try { await page.mouse.up(); } catch {}
-
   try {
     const vp = await page.viewport();
     const pageSize = await page.evaluate(() => ({
@@ -84,69 +114,70 @@ async function clickAt(page, xRatio, yRatio) {
       height: document.documentElement.scrollHeight
     }));
 
-    const realX = Math.floor(xRatio * pageSize.width);
-    const realY = Math.floor(yRatio * pageSize.height);
+    const px = Math.max(0, Math.floor(xRatio * pageSize.width));
+    const py = Math.max(0, Math.floor(yRatio * pageSize.height));
 
-    await page.evaluate(y => window.scrollTo(0, y - 100), realY);
+    await page.mouse.move(px, py);
 
-    const visible = await page.evaluate(() => ({
-      top: window.scrollY,
-      height: window.innerHeight
-    }));
+    await page.evaluate((xCoord, yCoord) => {
+      const elemento = document.elementFromPoint(xCoord, yCoord);
+      if (!elemento) return;
 
-    let clickX = Math.max(1, Math.min(realX, vp.width - 1));
-    let clickY = Math.max(1, Math.min(realY - visible.top, vp.height - 1));
+      const opts = {
+        bubbles: true, cancelable: true, view: window,
+        clientX: xCoord, clientY: yCoord, screenX: xCoord, screenY: yCoord
+      };
 
-    await page.evaluate(() => new Promise(res => requestAnimationFrame(res)));
+      elemento.dispatchEvent(new MouseEvent('mouseover', opts));
+      elemento.dispatchEvent(new MouseEvent('mousedown', opts));
+      elemento.focus({ preventScroll: true });
+      elemento.dispatchEvent(new MouseEvent('mouseup', opts));
+      elemento.dispatchEvent(new MouseEvent('click', opts));
 
-    await page.mouse.move(clickX, clickY);
-    await page.mouse.down();
-    await page.mouse.up();
-
-    console.log(`🖱 Clique → X=${clickX}px Y=${clickY}px`);
-
-    return await page.evaluate(([x, y]) => {
-      const el = document.elementFromPoint(x, y);
-      if (!el) return null;
-      const path = [];
-      let cur = el;
-      while (cur) {
-        path.push(cur.tagName);
-        cur = cur.parentElement;
+      if (typeof elemento.click === 'function') {
+        elemento.click();
       }
-      return { path };
-    }, [clickX, clickY]);
+    }, px, py);
+
+    console.log(`🖱 Clique → X=${px} Y=${py}`);
   } catch (err) {
     console.log("⚠️ Aviso no clique (navegação detectada):", err.message);
-    return null;
   }
 }
 
 // ===================================
-// INSERIR TEXTO
+// INSERIR TEXTO SEGURO
 // ===================================
-async function setText(page, elementInfo, text) {
-  if (!elementInfo) return;
-
+async function setText(page, text) {
+  if (!text) return;
   try {
-    await page.evaluate((info, value) => {
-      let el = document.body;
-      const path = info.path.slice().reverse();
-
-      for (let tag of path) {
-        const found = el.querySelector(tag);
-        if (found) el = found;
-      }
-
-      if (el && "value" in el) {
-        el.value = value;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-    }, elementInfo, text);
-
+    await page.keyboard.type(text);
     console.log("⌨ Texto inserido:", text);
   } catch (err) {
     console.log("⚠️ Erro ao inserir texto:", err.message);
+  }
+}
+
+// ===================================
+// INJEÇÃO SEGURA DE SCRIPT (SEM BUGAR DOM)
+// ===================================
+async function injectScript(page, codeScript) {
+  if (!codeScript || !codeScript.trim()) return;
+
+  try {
+    await page.evaluate((scriptContent) => {
+      const ID_SCRIPT_INJETADO = "__custom_local_script__";
+      let antigo = document.getElementById(ID_SCRIPT_INJETADO);
+      if (antigo) antigo.remove();
+
+      const s = document.createElement("script");
+      s.id = ID_SCRIPT_INJETADO;
+      s.textContent = scriptContent;
+      (document.body || document.documentElement).appendChild(s);
+    }, codeScript);
+    console.log("✅ Script customizado injetado com sucesso.");
+  } catch (err) {
+    console.log("⚠️ Erro ao injetar script (contexto alterado):", err.message);
   }
 }
 
@@ -176,12 +207,13 @@ async function screenshotSmart(page) {
 // ===================================
 // PRINCIPAL
 // ===================================
-async function executar(siteUrl) {
+async function executar() {
   const chromiumPath = getChromiumPath();
 
   const browser = await puppeteer.launch({
-    headless: true,
+    headless: "new",
     executablePath: chromiumPath,
+    userDataDir: USER_DATA_DIR,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -191,86 +223,106 @@ async function executar(siteUrl) {
       "--disable-dev-shm-usage",
       "--no-zygote",
       "--single-process",
-      "--disable-infobars"
+      "--disable-infobars",
+      "--allow-running-insecure-content"
     ]
   });
 
   const page = await browser.newPage();
   
-  // Define User-Agent real para evitar bloqueios de rede
-  await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
   await page.setViewport({ width: 1366, height: 768 });
+  await page.setBypassCSP(true);
 
-  // Ativa interceptação antes para evitar ERR_ABORTED
-  await page.setRequestInterception(true);
-  page.on("request", req => {
-    const type = req.resourceType();
-    if (["document", "xhr", "fetch", "script"].includes(type)) {
-      return req.continue();
-    }
-    if (["image", "media", "font", "stylesheet", "websocket"].includes(type)) {
-      return req.abort();
-    }
-    req.continue();
+  // Tratamento de novas abas indesejadas (evita crash ao abrir links externos como YouTube)
+  page.on('targetcreated', async (target) => {
+    try {
+      const newPage = await target.page();
+      if (newPage && newPage !== page) {
+        const targetUrl = newPage.url();
+        if (targetUrl && targetUrl !== 'about:blank') {
+          console.log(`🔀 Redirecionando aba nova para a página principal: ${targetUrl}`);
+          await newPage.close();
+          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        }
+      }
+    } catch (e) {}
   });
 
-  console.log("🌐 Carregando página:", siteUrl);
+  const initialJson = fetchLocalJSON();
+  let ultimaURL = corrigirUrl(initialJson.site || "https://google.com");
+
+  console.log("🌐 Carregando página inicial:", ultimaURL);
   try {
-    await page.goto(siteUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(ultimaURL, { waitUntil: "domcontentloaded", timeout: 30000 });
   } catch (err) {
-    console.log("⚠️ Aviso na navegação:", err.message);
+    console.log("⚠️ Aviso na navegação inicial:", err.message);
   }
 
-  console.log("🚀 Sistema rodando e lendo/salvando assets localmente.");
+  console.log("🚀 Sistema rodando localmente de forma estável.");
 
   let ultimoJSON = fetchLocalJSON();
-  let ultimaURL = siteUrl;
-  let lastClickInfo = null;
 
   while (true) {
-    const novoJSON = fetchLocalJSON();
+    try {
+      const novoJSON = fetchLocalJSON();
 
-    // Mudança de site via JSON local
-    if (novoJSON.site && novoJSON.site !== ultimaURL) {
-      const newURL = novoJSON.site.startsWith("http") ? novoJSON.site : "https://" + novoJSON.site;
-      console.log("🔀 Mudando para:", newURL);
-      try {
-        await page.goto(newURL, { waitUntil: "domcontentloaded" });
-        ultimaURL = newURL;
-      } catch (e) {
-        console.log("Erro ao trocar de site:", e.message);
+      // Atualiza URL no JSON se mudou internamente no navegador
+      const urlAtualNoBrowser = page.url();
+      if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
+        ultimaURL = urlAtualNoBrowser;
+        novoJSON.site = ultimaURL;
+        saveJSON(novoJSON);
       }
+
+      // Mudança de site via JSON local
+      if (novoJSON.site) {
+        const novaUrlFormatada = corrigirUrl(novoJSON.site);
+        if (novaUrlFormatada !== ultimaURL) {
+          console.log("🔀 Mudando para:", novaUrlFormatada);
+          try {
+            await page.goto(novaUrlFormatada, { waitUntil: "domcontentloaded", timeout: 30000 });
+            ultimaURL = novaUrlFormatada;
+            await injectScript(page, novoJSON.script);
+          } catch (e) {
+            console.log("Erro ao trocar de site:", e.message);
+          }
+        }
+      }
+
+      // Clique via JSON local
+      if (novoJSON.click && (!ultimoJSON.click || novoJSON.click.x !== ultimoJSON.click.x || novoJSON.click.y !== ultimoJSON.click.y)) {
+        await clickAt(page, novoJSON.click.x, novoJSON.click.y);
+        delete novoJSON.click;
+        saveJSON(novoJSON);
+      }
+
+      // Texto via JSON local
+      if (novoJSON.text && novoJSON.text !== ultimoJSON.text) {
+        await setText(page, novoJSON.text);
+        delete novoJSON.text;
+        saveJSON(novoJSON);
+      }
+
+      // Injeção de Script JS via JSON local (Sem quebrar o DOM)
+      if (novoJSON.script && novoJSON.script !== ultimoJSON.script) {
+        await injectScript(page, novoJSON.script);
+      }
+
+      // Salva print localmente
+      await screenshotSmart(page);
+
+      ultimoJSON = JSON.parse(JSON.stringify(novoJSON));
+    } catch (err) {
+      console.log("Erro no loop principal:", err.message);
     }
 
-    // Clique via JSON local
-    if (novoJSON.click && (!ultimoJSON.click || novoJSON.click.x !== ultimoJSON.click.x || novoJSON.click.y !== ultimoJSON.click.y)) {
-      lastClickInfo = await clickAt(page, novoJSON.click.x, novoJSON.click.y);
-      delete novoJSON.click;
-      saveJSON(novoJSON);
-    }
-
-    // Texto via JSON local
-    if (novoJSON.text) {
-      await setText(page, lastClickInfo, novoJSON.text);
-      delete novoJSON.text;
-      saveJSON(novoJSON);
-    }
-
-    // Salva print localmente
-    await screenshotSmart(page);
-
-    ultimoJSON = novoJSON;
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 500));
   }
 }
 
 // ===================================
 // INICIAR
 // ===================================
-(async () => {
-  const json = fetchLocalJSON();
-  let url = json.site || "https://google.com";
-  if (!url.startsWith("http")) url = "https://" + url;
-
-  await executar(url);
-})();
+executar().catch(err => {
+  console.error("❌ Erro fatal:", err.message);
+});
