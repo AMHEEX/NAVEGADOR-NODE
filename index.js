@@ -72,49 +72,54 @@ function getChromiumPath() {
 }
 
 // ===================================
-// CLIQUE
+// CLIQUE (COM TRATAMENTO DE CONTEXTO DESTRUÍDO)
 // ===================================
 async function clickAt(page, xRatio, yRatio) {
   try { await page.mouse.up(); } catch {}
 
-  const vp = await page.viewport();
-  const pageSize = await page.evaluate(() => ({
-    width: document.documentElement.clientWidth,
-    height: document.documentElement.scrollHeight
-  }));
+  try {
+    const vp = await page.viewport();
+    const pageSize = await page.evaluate(() => ({
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.scrollHeight
+    }));
 
-  const realX = Math.floor(xRatio * pageSize.width);
-  const realY = Math.floor(yRatio * pageSize.height);
+    const realX = Math.floor(xRatio * pageSize.width);
+    const realY = Math.floor(yRatio * pageSize.height);
 
-  await page.evaluate(y => window.scrollTo(0, y - 100), realY);
+    await page.evaluate(y => window.scrollTo(0, y - 100), realY);
 
-  const visible = await page.evaluate(() => ({
-    top: window.scrollY,
-    height: window.innerHeight
-  }));
+    const visible = await page.evaluate(() => ({
+      top: window.scrollY,
+      height: window.innerHeight
+    }));
 
-  let clickX = Math.max(1, Math.min(realX, vp.width - 1));
-  let clickY = Math.max(1, Math.min(realY - visible.top, vp.height - 1));
+    let clickX = Math.max(1, Math.min(realX, vp.width - 1));
+    let clickY = Math.max(1, Math.min(realY - visible.top, vp.height - 1));
 
-  await page.evaluate(() => new Promise(res => requestAnimationFrame(res)));
+    await page.evaluate(() => new Promise(res => requestAnimationFrame(res)));
 
-  await page.mouse.move(clickX, clickY);
-  await page.mouse.down();
-  await page.mouse.up();
+    await page.mouse.move(clickX, clickY);
+    await page.mouse.down();
+    await page.mouse.up();
 
-  console.log(`🖱 Clique → X=${clickX}px Y=${clickY}px`);
+    console.log(`🖱 Clique → X=${clickX}px Y=${clickY}px`);
 
-  return await page.evaluate(([x, y]) => {
-    const el = document.elementFromPoint(x, y);
-    if (!el) return null;
-    const path = [];
-    let cur = el;
-    while (cur) {
-      path.push(cur.tagName);
-      cur = cur.parentElement;
-    }
-    return { path };
-  }, [clickX, clickY]);
+    return await page.evaluate(([x, y]) => {
+      const el = document.elementFromPoint(x, y);
+      if (!el) return null;
+      const path = [];
+      let cur = el;
+      while (cur) {
+        path.push(cur.tagName);
+        cur = cur.parentElement;
+      }
+      return { path };
+    }, [clickX, clickY]);
+  } catch (err) {
+    console.log("⚠️ Aviso no clique (navegação detectada):", err.message);
+    return null;
+  }
 }
 
 // ===================================
@@ -123,22 +128,26 @@ async function clickAt(page, xRatio, yRatio) {
 async function setText(page, elementInfo, text) {
   if (!elementInfo) return;
 
-  await page.evaluate((info, value) => {
-    let el = document.body;
-    const path = info.path.slice().reverse();
+  try {
+    await page.evaluate((info, value) => {
+      let el = document.body;
+      const path = info.path.slice().reverse();
 
-    for (let tag of path) {
-      const found = el.querySelector(tag);
-      if (found) el = found;
-    }
+      for (let tag of path) {
+        const found = el.querySelector(tag);
+        if (found) el = found;
+      }
 
-    if (el && "value" in el) {
-      el.value = value;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-  }, elementInfo, text);
+      if (el && "value" in el) {
+        el.value = value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }, elementInfo, text);
 
-  console.log("⌨ Texto inserido:", text);
+    console.log("⌨ Texto inserido:", text);
+  } catch (err) {
+    console.log("⚠️ Erro ao inserir texto:", err.message);
+  }
 }
 
 // ===================================
@@ -179,11 +188,17 @@ async function executar(siteUrl) {
       "--disable-gpu",
       "--disable-web-security",
       "--disable-extensions",
-      "--disable-dev-shm-usage"
+      "--disable-dev-shm-usage",
+      "--no-zygote",
+      "--single-process",
+      "--disable-infobars"
     ]
   });
 
   const page = await browser.newPage();
+  
+  // Define User-Agent real para evitar bloqueios de rede
+  await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
   await page.setViewport({ width: 1366, height: 768 });
 
   // Ativa interceptação antes para evitar ERR_ABORTED
