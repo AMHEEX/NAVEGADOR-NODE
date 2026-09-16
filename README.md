@@ -1,10 +1,10 @@
-# 🚀 IAMEGM REPSOTIROI — Controle Remoto via Termux
+# 🇧🇷 NAVEGADOR-NODE — Controle Remoto via Termux
 
 ## O que é?
 Navegador headless completo baseado em **Puppeteer + PHP + Termux**, com interface moderna, toque, mouse e controles remotos.
 
 ## Ícone do Projeto
-![](https://github.com/AMHEEX/NAVEGADOR-NODE/assets/index.png)
+![IAMEGM REPSOTIROI](assets/index.png)
 
 ## Recursos
 - Navegador remoto real
