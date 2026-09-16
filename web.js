@@ -31,8 +31,7 @@ const http = require('http');
    ============================================================ */
 
 const BASE_DIR = path.resolve(
-    process.env.BASE_DIR ||
-    path.join(process.env.HOME || process.cwd(), 'NAVEGADOR-NODE')
+    process.env.BASE_DIR || __dirname
 );
 
 const PORT = Number(process.env.PORT || 8000);
