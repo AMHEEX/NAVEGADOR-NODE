@@ -1,9 +1,9 @@
 <?php
-$baseDir  = __DIR__;
-$metaFile = $baseDir . "/dados/index.json";
-$imageFile = $baseDir . "/dados/index.png";
+$baseDir   = __DIR__;
+$metaFile  = $baseDir . "/assets/index.json";
+$imageFile = $baseDir . "/assets/index.png";
 
-if (!is_dir($baseDir . "/dados")) mkdir($baseDir . "/dados", 0777, true);
+if (!is_dir($baseDir . "/assets")) mkdir($baseDir . "/assets", 0777, true);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents("php://input"), true) ?? [];
@@ -332,7 +332,7 @@ $temImagem = file_exists($imageFile);
         <?php if (!$temImagem): ?>
             <div style="color: #a0aec0; font-size: 14px;">Nenhuma imagem disponível ainda...</div>
         <?php else: ?>
-            <img id="telaRemota" src="dados/index.png?t=<?= time() ?>" alt="Aguardando print...">
+            <img id="telaRemota" src="assets/index.png?t=<?= time() ?>" alt="Aguardando print...">
         <?php endif; ?>
     </div>
 
@@ -369,7 +369,7 @@ $temImagem = file_exists($imageFile);
                 });
                 const data = await res.json();
                 if (imgTela) {
-                    imgTela.src = "dados/index.png?t=" + Date.now();
+                    imgTela.src = "assets/index.png?t=" + Date.now();
                 }
             } catch (e) {}
         }
@@ -501,7 +501,7 @@ $temImagem = file_exists($imageFile);
         });
 
         document.getElementById("btnEnviarTexto").addEventListener("click", () => {
-            menuFlutuante.style.display = "none";
+            menuFlutu_antec = menuFlutuante.style.display = "none";
             iconFlutuante.style.display = "block";
 
             mostrarModalInput({
@@ -554,7 +554,7 @@ $temImagem = file_exists($imageFile);
         // Atualização automática da imagem a cada 2 segundos
         setInterval(() => {
             if (imgTela) {
-                imgTela.src = "dados/index.png?t=" + Date.now();
+                imgTela.src = "assets/index.png?t=" + Date.now();
             }
         }, 2000);
     </script>
