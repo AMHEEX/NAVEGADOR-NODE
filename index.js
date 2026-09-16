@@ -163,20 +163,16 @@ async function clickAt(page, xRatio, yRatio) {
 async function setText(page, textValue) {
   if (!textValue || typeof textValue !== "string" || !textValue.trim()) return;
   try {
-    // Procura por um input ou elemento focado/ativo na página para preencher
     const filled = await page.evaluate((valor) => {
       let ativo = document.activeElement;
       
-      // Se o elemento ativo não for um input/textarea editável, pega o primeiro input visível da página
       if (!ativo || (ativo.tagName !== 'INPUT' && ativo.tagName !== 'TEXTAREA' && !ativo.isContentEditable)) {
         ativo = document.querySelector('input:not([type="hidden"]), textarea, [contenteditable="true"]');
       }
 
       if (ativo) {
         ativo.focus();
-        ativo.value = valor; // Substitui o texto diretamente
-        
-        // Dispara eventos para garantir que a página reconheça a alteração via JS/Frameworks (React, Vue, etc)
+        ativo.value = valor;
         ativo.dispatchEvent(new Event('input', { bubbles: true }));
         ativo.dispatchEvent(new Event('change', { bubbles: true }));
         return true;
@@ -187,7 +183,6 @@ async function setText(page, textValue) {
     if (filled) {
       console.log("⌨ Texto substituído/inserido nos inputs com sucesso:", textValue);
     } else {
-      // Fallback para digitação via teclado do Puppeteer se nenhum elemento for encontrado diretamente
       await page.keyboard.type(textValue);
       console.log("⌨ Texto digitado via teclado:", textValue);
     }
@@ -252,7 +247,7 @@ async function executar() {
     headless: "new",
     executablePath: chromiumPath,
     userDataDir: USER_DATA_DIR,
-    waitForInitialPage: false, // Previne o erro Target.setAutoAttach
+    waitForInitialPage: false,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -273,7 +268,6 @@ async function executar() {
   await page.setViewport({ width: 1366, height: 768 });
   await page.setBypassCSP(true);
 
-  // Tratamento de novas abas (evita crash ao abrir links externos como YouTube)
   page.on('targetcreated', async (target) => {
     try {
       const newPage = await target.page();
@@ -307,14 +301,14 @@ async function executar() {
 
   while (true) {
     try {
-      if (!browser.isConnected() || page.isClosed()) {
+      // Correção aplicada aqui (removido os parênteses de isConnected)
+      if (!browser.connected || page.isClosed()) {
         console.error("❌ O navegador foi fechado inesperadamente.");
         break;
       }
 
       const novoJSON = fetchLocalJSON();
 
-      // Atualiza URL no JSON se mudou internamente no navegador
       const urlAtualNoBrowser = page.url();
       if (urlAtualNoBrowser && urlAtualNoBrowser !== "about:blank" && urlAtualNoBrowser !== ultimaURL) {
         ultimaURL = urlAtualNoBrowser;
@@ -322,7 +316,6 @@ async function executar() {
         saveJSON(novoJSON);
       }
 
-      // Mudança de site via JSON local
       if (novoJSON.site) {
         const novaUrlFormatada = corrigirUrl(novoJSON.site);
         if (novaUrlFormatada !== ultimaURL) {
@@ -339,26 +332,22 @@ async function executar() {
         }
       }
 
-      // Clique via JSON local
       if (novoJSON.click && (!ultimoJSON.click || novoJSON.click.x !== ultimoJSON.click.x || novoJSON.click.y !== ultimoJSON.click.y)) {
         await clickAt(page, novoJSON.click.x, novoJSON.click.y);
         delete novoJSON.click;
         saveJSON(novoJSON);
       }
 
-      // Processa o Texto / Inputs e limpa imediatamente do JSON para evitar loops
       if (novoJSON.text && novoJSON.text.trim() !== "") {
         await setText(page, novoJSON.text);
-        novoJSON.text = ""; // Zera o campo para evitar loop de substituição
+        novoJSON.text = "";
         saveJSON(novoJSON);
       }
 
-      // Injeção de Script JS via JSON local
       if (novoJSON.script && novoJSON.script !== ultimoJSON.script) {
         await injectScript(page, novoJSON.script);
       }
 
-      // Salva print localmente
       await screenshotSmart(page);
 
       ultimoJSON = JSON.parse(JSON.stringify(novoJSON));
