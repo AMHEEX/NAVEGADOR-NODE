@@ -1,0 +1,50 @@
+{
+  "name": "data-uri-to-buffer",
+  "version": "8.0.0",
+  "type": "module",
+  "description": "Create an ArrayBuffer instance from a Data URI string",
+  "exports": {
+    "node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "default": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TooTallNate/proxy-agents.git",
+    "directory": "packages/data-uri-to-buffer"
+  },
+  "engines": {
+    "node": ">= 20"
+  },
+  "keywords": [
+    "data",
+    "uri",
+    "datauri",
+    "data-uri",
+    "buffer",
+    "convert",
+    "rfc2397",
+    "2397"
+  ],
+  "author": "Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.1.6",
+    "tsconfig": "0.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "eslint . --ext .ts",
+    "pack": "node ../../scripts/pack.mjs"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "proxy-agent",
+  "version": "8.0.2",
+  "type": "module",
+  "description": "Maps proxy protocols to `http.Agent` implementations",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "default": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">= 20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TooTallNate/proxy-agents.git",
+    "directory": "packages/proxy-agent"
+  },
+  "keywords": [
+    "http",
+    "https",
+    "socks",
+    "agent",
+    "mapping",
+    "proxy"
+  ],
+  "author": "Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)",
+  "license": "MIT",
+  "dependencies": {
+    "debug": "^4.3.4",
+    "lru-cache": "^7.14.1",
+    "proxy-from-env": "^2.0.0",
+    "agent-base": "9.0.0",
+    "http-proxy-agent": "9.1.0",
+    "https-proxy-agent": "9.1.0",
+    "pac-proxy-agent": "9.1.0",
+    "socks-proxy-agent": "10.1.0"
+  },
+  "devDependencies": {
+    "@types/agent-base": "^4.2.0",
+    "@types/debug": "^4.1.7",
+    "@types/node": "^22.13.0",
+    "@types/proxy-from-env": "^1.0.1",
+    "@types/ws": "^8.5.4",
+    "async-listen": "^3.0.0",
+    "socksv5": "github:TooTallNate/socksv5#d937368b28e929396166d77a06d387a4a902bd51",
+    "typescript": "^5.1.6",
+    "ws": "^8.20.1",
+    "tsconfig": "0.0.0",
+    "proxy": "4.1.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "eslint . --ext .ts",
+    "pack": "node ../../scripts/pack.mjs"
+  }
+}

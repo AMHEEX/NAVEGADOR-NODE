@@ -1,0 +1,15 @@
+# 1. Ativa a reescrita de URL
+RewriteEngine On
+
+# 2. Se o arquivo ou diretório físico NÃO existir, envia a requisição para o index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
+
+# 3. Configurações de PHP (Ajustadas para limites realistas de grande porte)
+# Nota: 10GB = 10240M. Valores irrestritos tendem a estourar o limite de RAM do servidor Render.com
+php_value upload_max_filesize 10240M
+php_value post_max_size 10240M
+php_value max_execution_time 86400
+php_value max_input_time 86400
+php_value memory_limit 2048M

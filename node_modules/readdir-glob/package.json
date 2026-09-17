@@ -1,0 +1,66 @@
+{
+  "author": "Yann Armelin",
+  "name": "readdir-glob",
+  "description": "Recursive fs.readdir with streaming API and glob filtering.",
+  "version": "3.0.0",
+  "homepage": "https://github.com/Yqnn/node-readdir-glob",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/Yqnn/node-readdir-glob.git"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist/**",
+    "src"
+  ],
+  "funding": {
+    "url": "https://github.com/sponsors/yqnn"
+  },
+  "exports": {
+    "import": {
+      "default": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    },
+    "require": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.mts"
+    }
+  },
+  "types": "./dist/index.d.mts",
+  "dependencies": {
+    "minimatch": "^10.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "jasmine": "^6.0.0",
+    "mkdirp": "^2.1.6",
+    "nyc": "^17.1.0",
+    "rimraf": "^3.0.2",
+    "tick": "0.0.6",
+    "tsdown": "^0.4.0",
+    "typescript": "^5.4.4"
+  },
+  "keywords": [
+    "recursive",
+    "fs",
+    "stream",
+    "streams",
+    "readdir",
+    "filesystem",
+    "find",
+    "filter",
+    "glob"
+  ],
+  "scripts": {
+    "test-cov": "npx nyc --reporter=lcov --reporter=text-summary --reporter=html jasmine --config=jasmine.json",
+    "test": "jasmine --config=jasmine.json",
+    "test-regen": "TEST_REGEN=1 jasmine --config=jasmine.json",
+    "build": "rimraf dist && tsdown",
+    "bench": "bash scripts/benchmark.sh",
+    "profile": "bash scripts/profile.sh && cat profile.txt"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  }
+}
